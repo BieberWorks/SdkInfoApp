@@ -107,7 +107,7 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
         LogFoundCsproj(repoId, csprojPaths.Count);
 
         // 3. Get Directory.Build.props for package prefix (best-effort)
-        var buildPropsText = await GetFileContentAsync(org, repoId, "Directory.Build.props", ct);
+        var buildPropsText = await GetFileContentAsync(org, repoId, "Directory.Build.props", defaultBranch, ct);
         var packagePrefix = CsprojParser.ReadPackagePrefixFromText(buildPropsText);
 
         // 4. Parse each csproj (own packages + raw edges)
@@ -118,7 +118,7 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
         {
             if (CsprojParser.IsTestProjectPath(csprojPath)) continue;
 
-            var text = await GetFileContentAsync(org, repoId, csprojPath, ct);
+            var text = await GetFileContentAsync(org, repoId, csprojPath, defaultBranch, ct);
             if (string.IsNullOrWhiteSpace(text)) continue;
 
             var projectFileName = Path.GetFileNameWithoutExtension(csprojPath);
@@ -137,7 +137,7 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
         }
 
         // 5. Manifest
-        var manifestText = await GetFileContentAsync(org, repoId, "module.manifest.json", ct);
+        var manifestText = await GetFileContentAsync(org, repoId, "module.manifest.json", defaultBranch, ct);
         var manifest = ParseManifest(repoId, manifestText);
 
         // Store raw edges; cross-repo resolution happens after all repos are scanned
@@ -186,11 +186,11 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
     }
 
     private async Task<string?> GetFileContentAsync(
-        string org, string repoId, string path, CancellationToken ct)
+        string org, string repoId, string path, string branch, CancellationToken ct)
     {
-        // Use --jq '.content' to get base64 blob and decode it
+        // Use --jq '.content' to get base64 blob and decode it; ?ref= pins the branch explicitly
         var b64 = await RunGhApiAsync(
-            ["api", $"repos/{org}/{repoId}/contents/{path}", "--jq", ".content"],
+            ["api", $"repos/{org}/{repoId}/contents/{path}?ref={branch}", "--jq", ".content"],
             ct);
 
         if (string.IsNullOrWhiteSpace(b64)) return null;
