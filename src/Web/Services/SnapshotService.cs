@@ -94,7 +94,8 @@ public sealed class SnapshotService(HttpClient http)
         {
             var current = queue.Dequeue();
             foreach (var edge in _snapshot.Edges.Where(e =>
-                string.Equals(e.From, current, StringComparison.OrdinalIgnoreCase)))
+                string.Equals(e.From, current, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(e.Kind, "impl", StringComparison.OrdinalIgnoreCase)))
             {
                 if (visited.Add(edge.To))
                     queue.Enqueue(edge.To);

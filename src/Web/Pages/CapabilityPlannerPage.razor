@@ -8,7 +8,7 @@
 <MudText Typo="Typo.h4" Class="mb-2">Capability Planner</MudText>
 <MudText Typo="Typo.body2" Class="mb-3">
     Select the capabilities your application needs. The planner computes the exact set of SDK modules
-    required — including transitive dependencies — and generates a ready-to-paste
+    required — including transitive <code>impl</code>-dependencies — and generates a ready-to-paste
     <code>PackageReference</code> snippet.
 </MudText>
 
@@ -26,32 +26,24 @@
     return;
 }
 
-@* ── Toolbar — full width ─────────────────────────────────────────────────────── *@
+@* ── Toolbar ─────────────────────────────────────────────────────────────────── *@
 <MudPaper Class="pa-3 mb-3" Elevation="1">
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="4" md="3">
-            <MudSelect T="string?" Label="Category" Value="_categoryFilter"
-                       ValueChanged="OnCategoryFilterChanged" Clearable="true">
-                @foreach (var g in _allGroups)
-                {
-                    <MudSelectItem T="string?" Value="@g.Label">@g.Label</MudSelectItem>
-                }
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" sm="5" md="4">
-            <MudTextField T="string" Label="Search" Value="_search"
+        <MudItem xs="12" sm="6" md="4">
+            <MudTextField T="string" Label="Search capabilities" Value="_search"
                           ValueChanged="OnSearchChanged"
                           Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.Search"
-                          Immediate="true" DebounceInterval="120" />
+                          Immediate="true" DebounceInterval="150" />
         </MudItem>
-        <MudItem xs="12" sm="3" md="5" Class="d-flex align-center gap-2 flex-wrap">
+        <MudItem xs="12" sm="6" md="8" Class="d-flex align-center gap-2 flex-wrap">
             <MudText Typo="Typo.body2">
-                <b>@_selected.Count</b> @(_selected.Count == 1 ? "capability" : "capabilities") selected
+                <b>@_selectedCapabilityIds.Count</b>
+                @(_selectedCapabilityIds.Count == 1 ? "capability" : "capabilities") selected
             </MudText>
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
                        StartIcon="@Icons.Material.Filled.Calculate"
-                       OnClick="Compute" Disabled="@(_selected.Count == 0)">
+                       OnClick="Compute" Disabled="@(_selectedCapabilityIds.Count == 0)">
                 Plan
             </MudButton>
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ClearAll">
@@ -64,39 +56,42 @@
 @* ── Two-column body ──────────────────────────────────────────────────────────── *@
 <MudGrid Spacing="3">
 
-    @* Left — Capability checkboxes *@
+    @* Left — Capability tree *@
     <MudItem xs="12" md="7">
-        <MudGrid Spacing="3">
-            @foreach (var group in _visibleGroups)
+        <MudTreeView T="string"
+                     SelectionMode="SelectionMode.MultiSelection"
+                     @bind-SelectedValues="_treeSelectedValues"
+                     @bind-SelectedValues:after="OnTreeSelectionChanged"
+                     AutoSelectParent="true"
+                     Dense="true"
+                     Hover="true"
+                     CheckBoxColor="Color.Primary">
+            @foreach (var group in _filteredGroups)
             {
-                <MudItem xs="12" sm="6">
-                    <MudText Typo="Typo.subtitle1" Class="mb-1" Style="font-weight:600;">
-                        @group.Label
-                    </MudText>
-                    @foreach (var capId in group.Members)
+                <MudTreeViewItem T="string"
+                                 Value="@($"__cat__{group.Id}")"
+                                 Text="@($"{group.Label} ({group.Caps.Count})")"
+                                 Expanded="@(!string.IsNullOrWhiteSpace(_search))">
+                    @foreach (var cap in group.Caps)
                     {
-                        var cap = _capById.GetValueOrDefault(capId);
-                        if (cap is null) continue;
-                        if (!MatchesSearch(cap)) continue;
-
-                        var isChecked = _selected.Contains(capId);
-                        <div class="d-flex align-center" style="margin-bottom:2px;">
-                            <MudCheckBox T="bool" Value="@isChecked"
-                                         ValueChanged="@((v) => OnCapabilityToggled(capId, v))"
-                                         Size="Size.Small" Color="Color.Primary" />
-                            <MudTooltip Text="@(cap.Description ?? cap.Label)" Placement="Placement.Right">
-                                <MudText Typo="Typo.body2" Style="cursor:default;">@cap.Label</MudText>
-                            </MudTooltip>
-                        </div>
+                        var capId = cap.Id;
+                        var desc = cap.Description ?? cap.Label;
+                        <MudTreeViewItem T="string" Value="@capId">
+                            <BodyContent>
+                                <MudTooltip Text="@desc" Placement="Placement.Right">
+                                    <MudText Typo="Typo.body2">@cap.Label</MudText>
+                                </MudTooltip>
+                            </BodyContent>
+                        </MudTreeViewItem>
                     }
-                </MudItem>
+                </MudTreeViewItem>
             }
-        </MudGrid>
+        </MudTreeView>
     </MudItem>
 
     @* Right — Result panel (sticky on desktop) *@
     <MudItem xs="12" md="5">
-        <div @ref="_resultRef" id="planner-result" style="position:sticky; top:16px;">
+        <div id="planner-result" style="position:sticky; top:16px;">
             @if (_result is null)
             {
                 <MudPaper Class="pa-4" Elevation="1"
@@ -113,7 +108,6 @@
                         Required Modules (@_result.AllModules.Count)
                     </MudText>
 
-                    @* Module list *@
                     <MudList T="ModuleInfo" Dense="true" Class="mb-2">
                         @foreach (var m in _result.AllModules)
                         {
@@ -144,14 +138,13 @@
                                     {
                                         <MudIcon Icon="@Icons.Material.Filled.Link"
                                                  Size="Size.Small" Color="Color.Default"
-                                                 Title="transitive dependency" />
+                                                 Title="transitive impl-dependency" />
                                     }
                                 </div>
                             </MudListItem>
                         }
                     </MudList>
 
-                    @* Copy buttons *@
                     <div class="d-flex gap-2 mb-2 flex-wrap">
                         <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                    StartIcon="@Icons.Material.Filled.ContentCopy"
@@ -165,13 +158,11 @@
                         </MudButton>
                     </div>
 
-                    @* Snippet preview *@
                     <MudPaper Elevation="0" Class="pa-2 mb-3"
                               Style="background:var(--mud-palette-background-grey); overflow:auto; max-height:240px;">
                         <pre style="font-size:0.72rem; white-space:pre-wrap; margin:0;">@_result.Snippet</pre>
                     </MudPaper>
 
-                    @* Mini dependency graph *@
                     <MudText Typo="Typo.subtitle2" Class="mb-1">Dependency Graph</MudText>
                     <CytoscapeGraph @ref="_miniGraph"
                                     Nodes="@_result.GraphNodes" Edges="@_result.GraphEdges"
@@ -184,16 +175,19 @@
 </MudGrid>
 
 @code {
+    private sealed record FilteredGroup(string Id, string Label, List<CapabilityInfo> Caps);
+
     // ── state ──────────────────────────────────────────────────────────────────
     private List<CapabilityGroup> _allGroups = [];
     private Dictionary<string, CapabilityInfo> _capById = [];
-    private HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
-    private string? _categoryFilter;
-    private string _search = "";
+    private List<FilteredGroup> _filteredGroups = [];
 
+    private IReadOnlyCollection<string> _treeSelectedValues = [];
+    private HashSet<string> _selectedCapabilityIds = new(StringComparer.OrdinalIgnoreCase);
+
+    private string _search = "";
     private PlanResult? _result;
     private CytoscapeGraph? _miniGraph;
-    private ElementReference _resultRef;
 
     // ── lifecycle ──────────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
@@ -204,50 +198,63 @@
 
         _allGroups = snap.CapabilityGroups.OrderBy(g => g.Label).ToList();
         _capById = snap.Capabilities.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+
+        RebuildFilteredGroups();
     }
 
-    // ── computed ───────────────────────────────────────────────────────────────
-    private IEnumerable<CapabilityGroup> _visibleGroups => _allGroups
-        .Where(g => _categoryFilter is null
-                    || string.Equals(g.Label, _categoryFilter, StringComparison.OrdinalIgnoreCase))
-        .Where(g => g.Members.Any(id =>
-        {
-            var cap = _capById.GetValueOrDefault(id);
-            return cap is not null && MatchesSearch(cap);
-        }));
-
-    private bool MatchesSearch(CapabilityInfo cap)
+    // ── filtering ──────────────────────────────────────────────────────────────
+    private void RebuildFilteredGroups()
     {
-        if (string.IsNullOrWhiteSpace(_search)) return true;
+        var hasSearch = !string.IsNullOrWhiteSpace(_search);
         var q = _search.Trim();
-        return cap.Label.Contains(q, StringComparison.OrdinalIgnoreCase)
-            || (cap.Description?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
+
+        _filteredGroups = _allGroups
+            .Select(group =>
+            {
+                var caps = group.Members
+                    .Select(id => _capById.GetValueOrDefault(id))
+                    .Where(cap => cap is not null)
+                    .Where(cap => !hasSearch
+                        || cap!.Label.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || (cap!.Description?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))
+                    .Select(cap => cap!)
+                    .ToList();
+                return new FilteredGroup(group.Id, group.Label, caps);
+            })
+            .Where(g => g.Caps.Count > 0)
+            .ToList();
     }
 
     // ── handlers ───────────────────────────────────────────────────────────────
-    private void OnCapabilityToggled(string id, bool value)
+    private void OnTreeSelectionChanged()
     {
-        if (value) _selected.Add(id);
-        else _selected.Remove(id);
+        _selectedCapabilityIds = _treeSelectedValues
+            .Where(v => v is not null && !v.StartsWith("__cat__", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         _result = null;
     }
 
-    private void OnCategoryFilterChanged(string? value) => _categoryFilter = value;
-
-    private void OnSearchChanged(string value) => _search = value;
+    private void OnSearchChanged(string value)
+    {
+        _search = value;
+        RebuildFilteredGroups();
+    }
 
     private void ClearAll()
     {
-        _selected.Clear();
+        _treeSelectedValues = [];
+        _selectedCapabilityIds.Clear();
         _result = null;
+        _search = "";
+        RebuildFilteredGroups();
     }
 
     private async Task Compute()
     {
         var snap = SnapshotService.Snapshot;
-        if (snap is null || _selected.Count == 0) return;
+        if (snap is null || _selectedCapabilityIds.Count == 0) return;
 
-        var directIds = SnapshotService.DirectModulesForCapabilities(_selected);
+        var directIds = SnapshotService.DirectModulesForCapabilities(_selectedCapabilityIds);
         var allIds = SnapshotService.TransitiveUpstreamClosure(directIds);
 
         var moduleMap = snap.Modules.ToDictionary(m => m.Id, StringComparer.OrdinalIgnoreCase);
@@ -259,7 +266,6 @@
             .ThenBy(m => m.Id)
             .ToList();
 
-        var nodeSet = allIds;
         var graphNodes = allModules.Select(m => new CyNode
         {
             Id = m.Id,
@@ -270,17 +276,15 @@
         }).ToList();
 
         var graphEdges = snap.Edges
-            .Where(e => nodeSet.Contains(e.From) && nodeSet.Contains(e.To))
+            .Where(e => allIds.Contains(e.From) && allIds.Contains(e.To))
             .Select(e => new CyEdge { Source = e.From, Target = e.To, Kind = e.Kind })
             .ToList();
 
         var snippet = PackageReferenceSnippetBuilder.BuildPackageReferences(allModules, directIds);
 
         _result = new PlanResult(directIds, allModules, graphNodes, graphEdges, snippet);
-
         StateHasChanged();
 
-        // Scroll result panel into view (helps on mobile where sticky doesn't help)
         await Task.Yield();
         try
         {
@@ -289,7 +293,6 @@
         }
         catch { /* non-critical */ }
 
-        // Highlight direct providers in mini-graph
         if (_miniGraph is not null && directIds.Count > 0)
             await _miniGraph.HighlightAsync(directIds.ToList());
     }
@@ -322,7 +325,6 @@
         }
     }
 
-    // ── helpers ────────────────────────────────────────────────────────────────
     private static string TierChipStyle(int tier)
     {
         var bg = tier switch
@@ -337,7 +339,6 @@
         return $"background-color:{bg};color:#fff;min-width:36px;";
     }
 
-    // ── nested types ───────────────────────────────────────────────────────────
     private sealed record PlanResult(
         HashSet<string> DirectModuleIds,
         List<ModuleInfo> AllModules,
