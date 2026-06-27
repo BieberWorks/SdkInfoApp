@@ -70,37 +70,15 @@ public sealed class SnapshotService(HttpClient http)
 
     /// <summary>
     /// Returns the direct provider modules for the given capability IDs.
+    /// Delegates to <see cref="SdkQuery.DirectModulesForCapabilities"/>.
     /// </summary>
     public HashSet<string> DirectModulesForCapabilities(IEnumerable<string> capabilityIds)
-    {
-        if (_snapshot is null) return [];
-        var ids = capabilityIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return _snapshot.Capabilities
-            .Where(c => ids.Contains(c.Id))
-            .SelectMany(c => c.ProvidedBy)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
+        => _snapshot is null ? [] : SdkQuery.DirectModulesForCapabilities(_snapshot, capabilityIds);
 
     /// <summary>
-    /// BFS over snapshot edges (From depends-on To) to compute the full upstream transitive closure.
-    /// Returns all module IDs the consumer must install, including seeds.
+    /// BFS upstream closure over impl-only edges.
+    /// Delegates to <see cref="SdkQuery.TransitiveUpstreamClosure"/>.
     /// </summary>
     public HashSet<string> TransitiveUpstreamClosure(IEnumerable<string> seeds)
-    {
-        if (_snapshot is null) return [];
-        var visited = seeds.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<string>(visited);
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            foreach (var edge in _snapshot.Edges.Where(e =>
-                string.Equals(e.From, current, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(e.Kind, "impl", StringComparison.OrdinalIgnoreCase)))
-            {
-                if (visited.Add(edge.To))
-                    queue.Enqueue(edge.To);
-            }
-        }
-        return visited;
-    }
+        => _snapshot is null ? [] : SdkQuery.TransitiveUpstreamClosure(_snapshot, seeds);
 }

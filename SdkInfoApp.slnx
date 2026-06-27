@@ -3,5 +3,6 @@
     <Project Path="src/Scanner.Model/Scanner.Model.csproj" />
     <Project Path="src/Scanner/Scanner.csproj" />
     <Project Path="src/Web/Web.csproj" />
+    <Project Path="src/Mcp/Mcp.csproj" />
   </Folder>
 </Solution>

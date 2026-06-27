@@ -1,7 +1,6 @@
-using SdkInfoApp.Scanner.Model;
 using System.Text;
 
-namespace SdkInfoApp.Web.Services;
+namespace SdkInfoApp.Scanner.Model;
 
 /// <summary>Pure-static builder for consumer-facing PackageReference XML snippets.</summary>
 public static class PackageReferenceSnippetBuilder
@@ -32,8 +31,6 @@ public static class PackageReferenceSnippetBuilder
                 if (!isDirect)
                     sb.AppendLine($"<!-- Transitively required by other modules: {m.Id} -->");
 
-                // Main impl package: the package(s) that are NOT Contracts-only and NOT UI.
-                // Strategy: emit each package. Mark UI packages with a comment.
                 foreach (var pkg in m.Packages)
                 {
                     var isUi = pkg.Contains(".UI.", StringComparison.OrdinalIgnoreCase)
