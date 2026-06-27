@@ -21,12 +21,22 @@
 
 <MudPaper Class="pa-2 mb-3" Elevation="1">
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="3">
             <MudSelect T="int?" Label="Filter by Tier" Value="_tierFilter" ValueChanged="OnTierFilterChanged" Clearable="true">
                 @foreach (var tier in _availableTiers)
                 {
                     <MudSelectItem T="int?" Value="@((int?)tier)">Tier @tier</MudSelectItem>
                 }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" Label="Arrangement" Value="_layoutMode" ValueChanged="OnLayoutModeChanged">
+                <MudSelectItem T="string" Value="@("dagre")">Hierarchical</MudSelectItem>
+                <MudSelectItem T="string" Value="@("cose")">Force-directed</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-tier")">Grid by Tier</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-name")">Grid A–Z</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-dependents")">Grid by Dependents</MudSelectItem>
+                <MudSelectItem T="string" Value="@("circle")">Circle</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="4">
@@ -43,10 +53,12 @@
                            Label="Transitive" Size="Size.Small" Color="Color.Primary" />
             </div>
         </MudItem>
-        <MudItem xs="12" sm="4" Class="d-flex align-center gap-2">
-            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
-                       OnClick="ResetLayout">Reset Layout</MudButton>
+        <MudItem xs="12" sm="2" Class="d-flex align-center gap-1 flex-wrap">
+            <MudIconButton Icon="@Icons.Material.Filled.Download" Title="Export PNG"
+                           OnClick="ExportPng" Size="Size.Small" />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ResetFilters">Reset</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.GridView" OnClick="ResetLayout">Layout</MudButton>
         </MudItem>
     </MudGrid>
     <MudGrid Spacing="2" Class="mt-1">
@@ -62,7 +74,7 @@
 
 <div style="position:relative;">
     <CytoscapeGraph @ref="_graph" Nodes="@_nodes" Edges="@_edges" Height="650px"
-                    PersistKey="modules"
+                    PersistKey="modules" Layout="@_layoutMode"
                     OnNodeClicked="OnNodeClicked" OnBackgroundTapped="OnBackgroundTapped" />
 
     @if (_selectedModule is not null)
@@ -123,6 +135,7 @@
     private string _clickDirection = "both";
     private bool _clickTransitive;
     private double _dimOpacity = 0.25;
+    private string _layoutMode = "dagre";
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,15 +143,18 @@
         _allModules = [.. SnapshotService.GetModulesSortedByTier()];
         _availableTiers = _allModules.Select(m => m.Tier).Distinct().Order().ToArray();
 
-        // Read persisted dim opacity (JS writes invariant dot-decimal; parse with InvariantCulture)
         try
         {
             var raw = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
             _dimOpacity = double.TryParse(raw, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var v)
                 ? Math.Clamp(v, 0.0, 0.5) : 0.25;
+
+            var savedLayout = await JS.InvokeAsync<string?>("localStorage.getItem", "sdkinfo.graph.layout.modules");
+            if (!string.IsNullOrEmpty(savedLayout))
+                _layoutMode = savedLayout;
         }
-        catch { /* JS not yet available — keep default */ }
+        catch { /* JS not yet available — keep defaults */ }
 
         RebuildGraph();
     }
@@ -205,6 +221,13 @@
         RebuildGraph();
     }
 
+    private async Task OnLayoutModeChanged(string value)
+    {
+        _layoutMode = value;
+        if (_graph is not null)
+            await _graph.ApplyLayoutAsync(value);
+    }
+
     private async Task OnClickDirectionChanged(string value)
     {
         _clickDirection = value;
@@ -224,6 +247,12 @@
         _dimOpacity = value;
         if (_graph is not null)
             await _graph.SetDimOpacityAsync(value);
+    }
+
+    private async Task ExportPng()
+    {
+        if (_graph is not null)
+            await _graph.ExportPngAsync("sdk-module-graph.png");
     }
 
     private async Task ResetLayout()

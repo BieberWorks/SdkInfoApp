@@ -21,7 +21,7 @@
 }
 
 <MudPaper Class="pa-3 mb-3" Elevation="1">
-    <MudText Typo="Typo.subtitle2" Class="mb-1">Highlight by module</MudText>
+    <MudText Typo="Typo.subtitle2" Class="mb-1">Highlight by module (chips = base)</MudText>
     <div class="d-flex flex-wrap gap-1 mb-2">
         @foreach (var m in _moduleEntries)
         {
@@ -46,7 +46,24 @@
     <MudDivider Class="my-2" />
 
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="6">
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" Label="Arrangement" Value="_layoutMode" ValueChanged="OnLayoutModeChanged">
+                <MudSelectItem T="string" Value="@("cose")">Force-directed</MudSelectItem>
+                <MudSelectItem T="string" Value="@("dagre")">Hierarchical</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-tier")">Grid by Tier</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-name")">Grid A–Z</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-dependents")">Grid by Dependents</MudSelectItem>
+                <MudSelectItem T="string" Value="@("circle")">Circle</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect T="string" Label="Click combine" Value="_combineMode" ValueChanged="OnCombineModeChanged">
+                <MudSelectItem T="string" Value="@("base")">Chips as base</MudSelectItem>
+                <MudSelectItem T="string" Value="@("union")">Union</MudSelectItem>
+                <MudSelectItem T="string" Value="@("intersection")">Intersection</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
             <MudText Typo="Typo.caption" Class="mb-1">Click direction</MudText>
             <div class="d-flex flex-wrap align-center gap-2">
                 <MudToggleGroup T="string" Value="_clickDirection" ValueChanged="OnClickDirectionChanged"
@@ -60,10 +77,12 @@
                            Label="Transitive" Size="Size.Small" Color="Color.Primary" />
             </div>
         </MudItem>
-        <MudItem xs="12" sm="6" Class="d-flex align-center gap-2">
-            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
-                       OnClick="ResetLayout">Reset Layout</MudButton>
+        <MudItem xs="12" sm="2" Class="d-flex align-center gap-1 flex-wrap">
+            <MudIconButton Icon="@Icons.Material.Filled.Download" Title="Export PNG"
+                           OnClick="ExportPng" Size="Size.Small" />
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ResetFilters">Reset</MudButton>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.GridView" OnClick="ResetLayout">Layout</MudButton>
         </MudItem>
     </MudGrid>
     <MudGrid Spacing="2" Class="mt-1">
@@ -79,7 +98,7 @@
 
 <div style="position:relative;">
     <CytoscapeGraph @ref="_graph" Nodes="@_nodes" Edges="@_edges" Height="650px"
-                    PersistKey="packages" Layout="cose"
+                    PersistKey="packages" Layout="@_layoutMode"
                     OnNodeClicked="OnNodeClicked" OnBackgroundTapped="OnBackgroundTapped" />
 
     @if (_selectedPackage is not null)
@@ -124,6 +143,8 @@
     private string _clickDirection = "both";
     private bool _clickTransitive;
     private double _dimOpacity = 0.25;
+    private string _layoutMode = "cose";
+    private string _combineMode = "base";
 
     protected override async Task OnInitializedAsync()
     {
@@ -136,15 +157,18 @@
             .OrderBy(m => m.Tier).ThenBy(m => m.Name)
             .ToList();
 
-        // Read persisted dim opacity (JS writes invariant dot-decimal; parse with InvariantCulture)
         try
         {
             var raw = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
             _dimOpacity = double.TryParse(raw, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var v)
                 ? Math.Clamp(v, 0.0, 0.5) : 0.25;
+
+            var savedLayout = await JS.InvokeAsync<string?>("localStorage.getItem", "sdkinfo.graph.layout.packages");
+            if (!string.IsNullOrEmpty(savedLayout))
+                _layoutMode = savedLayout;
         }
-        catch { /* JS not yet available — keep default */ }
+        catch { /* JS not yet available — keep defaults */ }
 
         RebuildGraph();
     }
@@ -178,25 +202,35 @@
         if (!_activeModules.Add(moduleName))
             _activeModules.Remove(moduleName);
 
-        await ApplyModuleHighlight();
+        await ApplyBaseHighlight();
     }
 
-    private async Task ApplyModuleHighlight()
+    private async Task ApplyBaseHighlight()
     {
         if (_graph is null) return;
 
-        if (_activeModules.Count == 0)
-        {
-            await _graph.ClearHighlightAsync();
-            return;
-        }
+        var ids = _activeModules.Count == 0
+            ? (IReadOnlyList<string>)[]
+            : _allPackageNodes
+                .Where(p => _activeModules.Contains(p.Module))
+                .Select(p => p.Id)
+                .ToList();
 
-        var ids = _allPackageNodes
-            .Where(p => _activeModules.Contains(p.Module))
-            .Select(p => p.Id)
-            .ToList();
+        await _graph.SetBaseHighlightAsync(ids);
+    }
 
-        await _graph.HighlightAsync(ids);
+    private async Task OnLayoutModeChanged(string value)
+    {
+        _layoutMode = value;
+        if (_graph is not null)
+            await _graph.ApplyLayoutAsync(value);
+    }
+
+    private async Task OnCombineModeChanged(string value)
+    {
+        _combineMode = value;
+        if (_graph is not null)
+            await _graph.SetCombineModeAsync(value);
     }
 
     private async Task OnClickDirectionChanged(string value)
@@ -243,10 +277,8 @@
 
     private async Task OnBackgroundTapped()
     {
+        // Only close detail panel; chips remain as base, JS restores base highlight
         _selectedPackage = null;
-        _activeModules.Clear();
-        if (_graph is not null)
-            await _graph.ClearHighlightAsync();
         StateHasChanged();
     }
 
@@ -256,16 +288,25 @@
         StateHasChanged();
     }
 
+    private async Task ExportPng()
+    {
+        if (_graph is not null)
+            await _graph.ExportPngAsync("sdk-package-graph.png");
+    }
+
     private async Task ResetFilters()
     {
         _activeModules.Clear();
         _selectedPackage = null;
         _clickDirection = "both";
         _clickTransitive = false;
+        _combineMode = "base";
         if (_graph is not null)
         {
+            await _graph.SetBaseHighlightAsync([]);
             await _graph.ClearHighlightAsync();
             await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+            await _graph.SetCombineModeAsync(_combineMode);
         }
     }
 

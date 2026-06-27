@@ -69,6 +69,37 @@
             await _module.InvokeVoidAsync("setDimOpacity", _elementId, value);
     }
 
+    public async Task ApplyLayoutAsync(string mode)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("applyLayout", _elementId, mode);
+    }
+
+    public async Task SetBaseHighlightAsync(IReadOnlyList<string> ids)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("setBaseHighlight", _elementId, ids);
+    }
+
+    public async Task SetCombineModeAsync(string mode)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("setCombineMode", _elementId, mode);
+    }
+
+    public async Task ExportPngAsync(string filename)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("exportPng", _elementId, filename);
+    }
+
+    public async Task<string?> GetPersistedLayoutAsync()
+    {
+        if (_initialized && _module is not null)
+            return await _module.InvokeAsync<string?>("getPersistedLayout", PersistKey);
+        return null;
+    }
+
     [JSInvokable]
     public Task NodeClickedAsync(string nodeId) => OnNodeClicked.InvokeAsync(nodeId);
 
