@@ -294,6 +294,24 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         return tiers;
     }
 
+    /// <summary>
+    /// Strips all local/internal data from a snapshot before writing it as a public release artifact.
+    /// Returns a new <see cref="SdkSnapshot"/> with <c>snapshotMode = "release"</c> and
+    /// all <c>localDevVersion</c> / <c>localDevPresent</c> fields cleared.
+    /// </summary>
+    public static SdkSnapshot SanitizeForRelease(SdkSnapshot snapshot)
+    {
+        var cleanModules = snapshot.Modules
+            .Select(m => m with { LocalDevVersion = null, LocalDevPresent = false })
+            .ToList();
+
+        return snapshot with
+        {
+            SnapshotMode = "release",
+            Modules = cleanModules,
+        };
+    }
+
     private static string? FindLocalDevVersion(
         IReadOnlyList<string> ownPackages,
         Dictionary<string, string> localDevVersions)

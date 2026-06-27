@@ -6,13 +6,13 @@ namespace SdkInfoApp.Scanner;
 
 internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
 {
+    private readonly ILogger<ScannerApp> _logger = loggerFactory.CreateLogger<ScannerApp>();
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
-
-    private readonly ILogger<ScannerApp> _logger = loggerFactory.CreateLogger<ScannerApp>();
 
     public async Task RunAsync(
         string mode,
@@ -26,7 +26,7 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
         SdkSnapshot snapshot = mode switch
         {
             "local" => await RunLocalAsync(workspace, ct),
-            "release" => await RunReleaseStubAsync(org, ct),
+            "release" => await RunReleaseAsync(org, ct),
             _ => throw new ArgumentException($"Unknown mode: {mode}. Use 'local' or 'release'.")
         };
 
@@ -58,20 +58,20 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
         return builder.Build(repoInfos, localDevVersions, ghDataMap, "local");
     }
 
-    private Task<SdkSnapshot> RunReleaseStubAsync(string org, CancellationToken ct)
+    private async Task<SdkSnapshot> RunReleaseAsync(string org, CancellationToken ct)
     {
-        // TODO Phase 3: Implement ReleaseScanner using gh API
-        // - Enumerate repos via gh api /orgs/{org}/repos
-        // - Fetch csproj content via gh api /repos/{org}/{repo}/git/trees/main?recursive=1
-        // - Fetch module.manifest.json via gh api /repos/{org}/{repo}/contents/module.manifest.json
-        // - Build snapshot with SanitizeForRelease() (no localDevVersion, no local paths)
-        LogReleaseModeStub();
-        var snapshot = new SdkSnapshot
-        {
-            SnapshotMode = "release",
-            GeneratedAt = DateTimeOffset.UtcNow,
-        };
-        return Task.FromResult(snapshot);
+        var scanner = new ReleaseScanner(loggerFactory.CreateLogger<ReleaseScanner>());
+        var ghFetcher = new GitHubDataFetcher(loggerFactory.CreateLogger<GitHubDataFetcher>());
+        var builder = new SnapshotBuilder(loggerFactory.CreateLogger<SnapshotBuilder>());
+
+        var repoInfos = await scanner.ScanOrgAsync(org, ct);
+        LogFoundRepos(repoInfos.Count);
+
+        var ghDataMap = await ghFetcher.FetchAllAsync(org, repoInfos.Keys, ct);
+
+        // Release mode: no local feed; pass empty dict
+        var snapshot = builder.Build(repoInfos, [], ghDataMap, "release");
+        return SnapshotBuilder.SanitizeForRelease(snapshot);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Scanner running in mode={Mode}")]
@@ -86,6 +86,4 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
     [LoggerMessage(Level = LogLevel.Information, Message = "Snapshot written to {Output}: {ModuleCount} modules, {EdgeCount} edges")]
     private partial void LogSnapshotWritten(string output, int moduleCount, int edgeCount);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Release mode is a stub (Phase 3). Writing empty snapshot.")]
-    private partial void LogReleaseModeStub();
 }

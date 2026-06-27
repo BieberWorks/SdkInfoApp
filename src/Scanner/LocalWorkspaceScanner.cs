@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SdkInfoApp.Scanner.Model;
 using System.Text.Json;
-using System.Xml.Linq;
 
 namespace SdkInfoApp.Scanner;
 
@@ -120,52 +119,24 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
     {
         var buildPropsPath = Path.Combine(repoDir, "Directory.Build.props");
         if (!File.Exists(buildPropsPath)) return "BieberWorks.SDK";
-
-        try
-        {
-            var doc = XDocument.Load(buildPropsPath);
-            var prefix = doc.Descendants("PackagePrefix").FirstOrDefault()?.Value;
-            return string.IsNullOrEmpty(prefix) ? "BieberWorks.SDK" : prefix;
-        }
-        catch
-        {
-            return "BieberWorks.SDK";
-        }
+        try { return CsprojParser.ReadPackagePrefixFromText(File.ReadAllText(buildPropsPath)); }
+        catch { return "BieberWorks.SDK"; }
     }
 
     private static string ReadPackageId(string csprojPath, string packagePrefix)
     {
         try
         {
-            var doc = XDocument.Load(csprojPath);
-
-            // Explicit <PackageId>
-            var explicit_ = doc.Descendants("PackageId").FirstOrDefault()?.Value;
-            if (!string.IsNullOrEmpty(explicit_)) return explicit_;
-
-            // Derive from project file name: BieberWorks.SDK.<ProjectName>
-            var projectName = Path.GetFileNameWithoutExtension(csprojPath);
-            return $"{packagePrefix}.{projectName}";
+            var text = File.ReadAllText(csprojPath);
+            return CsprojParser.ReadPackageIdFromText(text, Path.GetFileNameWithoutExtension(csprojPath), packagePrefix);
         }
-        catch
-        {
-            return "";
-        }
+        catch { return ""; }
     }
 
     private static IEnumerable<(string packageId, string version)> ReadPackageReferences(string csprojPath)
     {
-        XDocument doc;
-        try { doc = XDocument.Load(csprojPath); }
-        catch { yield break; }
-
-        foreach (var el in doc.Descendants("PackageReference"))
-        {
-            var include = el.Attribute("Include")?.Value;
-            var version = el.Attribute("Version")?.Value ?? el.Element("Version")?.Value ?? "";
-            if (!string.IsNullOrEmpty(include))
-                yield return (include, version);
-        }
+        try { return CsprojParser.ReadPackageReferencesFromText(File.ReadAllText(csprojPath)); }
+        catch { return []; }
     }
 
     private ModuleManifest? TryReadManifest(string repoDir, string repoId)
@@ -186,12 +157,8 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
     }
 
     private static bool IsTestProject(string csprojPath)
-    {
-        var dir = Path.GetDirectoryName(csprojPath) ?? "";
-        return dir.Contains("tests", StringComparison.OrdinalIgnoreCase)
-            || dir.Contains("test", StringComparison.OrdinalIgnoreCase)
-            || csprojPath.Contains(".Tests", StringComparison.OrdinalIgnoreCase);
-    }
+        => CsprojParser.IsTestProjectPath(csprojPath)
+        || CsprojParser.IsTestProjectPath(Path.GetDirectoryName(csprojPath) ?? "");
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Built package-to-repo map with {Count} entries")]
     private partial void LogPackageMapBuilt(int count);
