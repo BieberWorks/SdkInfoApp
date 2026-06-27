@@ -32,6 +32,9 @@ public sealed record ManifestCapability
     [JsonPropertyName("label")]
     public string Label { get; init; } = "";
 
+    [JsonPropertyName("category")]
+    public string Category { get; init; } = "";
+
     [JsonPropertyName("description")]
     public string? Description { get; init; }
 }

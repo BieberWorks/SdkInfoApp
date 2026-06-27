@@ -45,7 +45,7 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
         var localFeed = Path.Combine(workspace, "local-nuget-feed");
         var scanner = new LocalWorkspaceScanner(loggerFactory.CreateLogger<LocalWorkspaceScanner>());
         var ghFetcher = new GitHubDataFetcher(loggerFactory.CreateLogger<GitHubDataFetcher>());
-        var builder = new SnapshotBuilder();
+        var builder = new SnapshotBuilder(loggerFactory.CreateLogger<SnapshotBuilder>());
 
         var repoInfos = scanner.ScanWorkspace(workspace);
         LogFoundRepos(repoInfos.Count);

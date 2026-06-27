@@ -102,7 +102,7 @@ public sealed record EdgeInfo
     public string Kind { get; init; } = "impl";
 }
 
-public sealed record CapabilityInfo
+public sealed class CapabilityInfo
 {
     [JsonPropertyName("id")]
     public string Id { get; init; } = "";
@@ -110,11 +110,15 @@ public sealed record CapabilityInfo
     [JsonPropertyName("label")]
     public string Label { get; init; } = "";
 
+    [JsonPropertyName("category")]
+    public string Category { get; init; } = "";
+
     [JsonPropertyName("description")]
     public string? Description { get; init; }
 
+    /// <summary>Mutable for aggregation in SnapshotBuilder; serialised as JSON array.</summary>
     [JsonPropertyName("providedBy")]
-    public IReadOnlyList<string> ProvidedBy { get; init; } = [];
+    public List<string> ProvidedBy { get; init; } = [];
 }
 
 public sealed record PackageNode

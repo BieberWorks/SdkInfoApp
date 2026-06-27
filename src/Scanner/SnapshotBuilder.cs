@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using SdkInfoApp.Scanner.Model;
 
 namespace SdkInfoApp.Scanner;
@@ -5,7 +6,7 @@ namespace SdkInfoApp.Scanner;
 /// <summary>
 /// Aggregates scan results into a <see cref="SdkSnapshot"/>.
 /// </summary>
-internal sealed class SnapshotBuilder
+internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
 {
     public SdkSnapshot Build(
         Dictionary<string, RepoScanResult> repoInfos,
@@ -74,17 +75,17 @@ internal sealed class SnapshotBuilder
                         {
                             Id = cap.Id,
                             Label = cap.Label,
+                            Category = cap.Category,
                             Description = cap.Description,
                             ProvidedBy = [repoId],
                         };
                     }
                     else
                     {
-                        // Merge providers
-                        capabilityMap[cap.Id] = existing with
-                        {
-                            ProvidedBy = [.. existing.ProvidedBy, repoId],
-                        };
+                        // ID collision across modules — extend ProvidedBy and warn
+                        if (!string.Equals(existing.Label, cap.Label, StringComparison.OrdinalIgnoreCase))
+                            LogCapabilityLabelConflict(cap.Id, existing.Label, cap.Label, repoId);
+                        existing.ProvidedBy.Add(repoId);
                     }
                 }
             }
@@ -96,18 +97,37 @@ internal sealed class SnapshotBuilder
         // Build package-level graph
         var (packageNodes, packageEdges) = BuildPackageGraph(repoInfos, tierMap);
 
+        var capabilities = capabilityMap.Values.OrderBy(c => c.Id).ToList();
+        var capabilityGroups = BuildCapabilityGroups(capabilities);
+
         return new SdkSnapshot
         {
             SnapshotMode = snapshotMode,
             GeneratedAt = DateTimeOffset.UtcNow,
             Modules = modules,
             Edges = edges,
-            Capabilities = capabilityMap.Values.OrderBy(c => c.Id).ToList(),
-            CapabilityGroups = [],
+            Capabilities = capabilities,
+            CapabilityGroups = capabilityGroups,
             PackageNodes = packageNodes,
             PackageEdges = packageEdges,
         };
     }
+
+    private static List<CapabilityGroup> BuildCapabilityGroups(List<CapabilityInfo> capabilities)
+        => capabilities
+            .GroupBy(c => c.Category)
+            .Select(g => new CapabilityGroup
+            {
+                Id = g.Key.ToLowerInvariant().Replace(" / ", "-").Replace(" ", "-"),
+                Label = g.Key,
+                Members = g.Select(c => c.Id).ToList(),
+            })
+            .OrderBy(g => g.Label)
+            .ToList();
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Capability ID '{CapId}' defined in multiple modules with different labels: '{ExistingLabel}' vs '{NewLabel}' (in {RepoId})")]
+    private partial void LogCapabilityLabelConflict(string capId, string existingLabel, string newLabel, string repoId);
 
     private static (List<PackageNode> nodes, List<PackageEdge> edges) BuildPackageGraph(
         Dictionary<string, RepoScanResult> repoInfos,
