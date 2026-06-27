@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using SdkInfoApp.Scanner.Model;
-using System.Reflection;
 using System.Text.Json;
 
 namespace SdkInfoApp.Scanner;
@@ -15,6 +14,7 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         Dictionary<string, string> localDevVersions,
         Dictionary<string, GhRepoData> ghDataMap,
         string snapshotMode,
+        Dictionary<string, int>? releaseOrderMap,
         string branch = "local")
     {
         var modules = new List<ModuleInfo>();
@@ -30,8 +30,7 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         // Compute dependency tiers via impl-only longest-path DFS (cycle-safe)
         var tierMap = ComputeTiers(repoInfos);
 
-        // Load curated release-order map
-        var releaseOrderMap = LoadReleaseOrderMap();
+        releaseOrderMap ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         // Dangling-ref tracking: warnings deduplicated
         var danglingWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -223,14 +222,6 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
     private partial void LogCapabilityLabelConflict(string capId, string existingLabel, string newLabel, string repoId);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "release-order.json embedded resource not found; releaseOrder will be null for all modules")]
-    private partial void LogReleaseOrderResourceMissing();
-
-    [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Failed to load release-order.json: {Error}")]
-    private partial void LogReleaseOrderLoadFailed(string error);
-
-    [LoggerMessage(Level = LogLevel.Warning,
         Message = "release-order drift: {Module} (order {ModuleOrder}) impl-depends on {Dep} (order {DepOrder})")]
     private partial void LogReleaseOrderDrift(string module, int moduleOrder, string dep, int depOrder);
 
@@ -385,37 +376,6 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
             Dfs(id);
 
         return memo;
-    }
-
-    /// <summary>
-    /// Loads the curated release-order map from the embedded resource.
-    /// Returns an empty dictionary (with a warning log) when the resource is missing.
-    /// </summary>
-    private Dictionary<string, int> LoadReleaseOrderMap()
-    {
-        var asm = Assembly.GetExecutingAssembly();
-        var resourceName = asm.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith("release-order.json", StringComparison.OrdinalIgnoreCase));
-
-        if (resourceName is null)
-        {
-            LogReleaseOrderResourceMissing();
-            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        try
-        {
-            using var stream = asm.GetManifestResourceStream(resourceName)!;
-            var map = JsonSerializer.Deserialize<Dictionary<string, int>>(stream);
-            return map is not null
-                ? new Dictionary<string, int>(map, StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        }
-        catch (Exception ex)
-        {
-            LogReleaseOrderLoadFailed(ex.Message);
-            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        }
     }
 
     /// <summary>
