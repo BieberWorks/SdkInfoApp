@@ -46,16 +46,7 @@
     <MudDivider Class="my-2" />
 
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="4">
-            <MudSelect T="string?" Label="Highlight dependents of" Value="_focusPackage"
-                       ValueChanged="OnFocusPackageChanged" Clearable="true">
-                @foreach (var p in _allPackageNodes)
-                {
-                    <MudSelectItem T="string?" Value="@p.Id">@ShortLabel(p.Id)</MudSelectItem>
-                }
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="6">
             <MudText Typo="Typo.caption" Class="mb-1">Click direction</MudText>
             <div class="d-flex flex-wrap align-center gap-2">
                 <MudToggleGroup T="string" Value="_clickDirection" ValueChanged="OnClickDirectionChanged"
@@ -69,7 +60,7 @@
                            Label="Transitive" Size="Size.Small" Color="Color.Primary" />
             </div>
         </MudItem>
-        <MudItem xs="12" sm="4" Class="d-flex align-center gap-2">
+        <MudItem xs="12" sm="6" Class="d-flex align-center gap-2">
             <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
                        OnClick="ResetLayout">Reset Layout</MudButton>
@@ -129,7 +120,6 @@
     private List<CyNode> _nodes = [];
     private List<CyEdge> _edges = [];
     private HashSet<string> _activeModules = new(StringComparer.OrdinalIgnoreCase);
-    private string? _focusPackage;
     private PackageNode? _selectedPackage;
     private string _clickDirection = "both";
     private bool _clickTransitive;
@@ -146,12 +136,13 @@
             .OrderBy(m => m.Tier).ThenBy(m => m.Name)
             .ToList();
 
-        // Read persisted dim opacity
+        // Read persisted dim opacity (JS writes invariant dot-decimal; parse with InvariantCulture)
         try
         {
-            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
-            if (stored is not null && double.TryParse(stored, out var parsed))
-                _dimOpacity = parsed;
+            var raw = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
+            _dimOpacity = double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)
+                ? Math.Clamp(v, 0.0, 0.5) : 0.25;
         }
         catch { /* JS not yet available — keep default */ }
 
@@ -187,7 +178,6 @@
         if (!_activeModules.Add(moduleName))
             _activeModules.Remove(moduleName);
 
-        _focusPackage = null;
         await ApplyModuleHighlight();
     }
 
@@ -209,23 +199,6 @@
         await _graph.HighlightAsync(ids);
     }
 
-    private async Task OnFocusPackageChanged(string? value)
-    {
-        _focusPackage = value;
-        _activeModules.Clear();
-
-        if (_graph is null) return;
-
-        if (string.IsNullOrEmpty(value))
-        {
-            await _graph.ClearHighlightAsync();
-            return;
-        }
-
-        var dependents = GetDependents(value, SnapshotService.Snapshot!.PackageEdges).ToList();
-        await _graph.HighlightAsync(dependents);
-    }
-
     private async Task OnClickDirectionChanged(string value)
     {
         _clickDirection = value;
@@ -245,20 +218,6 @@
         _dimOpacity = value;
         if (_graph is not null)
             await _graph.SetDimOpacityAsync(value);
-    }
-
-    private static HashSet<string> GetDependents(string packageId, IReadOnlyList<PackageEdge> edges)
-    {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { packageId };
-        bool changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var e in edges)
-                if (result.Contains(e.To) && result.Add(e.From))
-                    changed = true;
-        }
-        return result;
     }
 
     private static string ShortLabel(string packageId)
@@ -285,7 +244,6 @@
     private async Task OnBackgroundTapped()
     {
         _selectedPackage = null;
-        _focusPackage = null;
         _activeModules.Clear();
         if (_graph is not null)
             await _graph.ClearHighlightAsync();
@@ -301,7 +259,6 @@
     private async Task ResetFilters()
     {
         _activeModules.Clear();
-        _focusPackage = null;
         _selectedPackage = null;
         _clickDirection = "both";
         _clickTransitive = false;

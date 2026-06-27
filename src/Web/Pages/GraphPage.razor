@@ -21,7 +21,7 @@
 
 <MudPaper Class="pa-2 mb-3" Elevation="1">
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="3">
+        <MudItem xs="12" sm="4">
             <MudSelect T="int?" Label="Filter by Tier" Value="_tierFilter" ValueChanged="OnTierFilterChanged" Clearable="true">
                 @foreach (var tier in _availableTiers)
                 {
@@ -29,15 +29,7 @@
                 }
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="3">
-            <MudSelect T="string?" Label="Highlight dependents of" Value="_focusModule" ValueChanged="OnFocusModuleChanged" Clearable="true">
-                @foreach (var m in _allModules)
-                {
-                    <MudSelectItem T="string?" Value="@m.Id">@m.Id</MudSelectItem>
-                }
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" sm="3">
+        <MudItem xs="12" sm="4">
             <MudText Typo="Typo.caption" Class="mb-1">Click direction</MudText>
             <div class="d-flex flex-wrap align-center gap-2">
                 <MudToggleGroup T="string" Value="_clickDirection" ValueChanged="OnClickDirectionChanged"
@@ -51,7 +43,7 @@
                            Label="Transitive" Size="Size.Small" Color="Color.Primary" />
             </div>
         </MudItem>
-        <MudItem xs="12" sm="3" Class="d-flex align-center gap-2">
+        <MudItem xs="12" sm="4" Class="d-flex align-center gap-2">
             <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
                        OnClick="ResetLayout">Reset Layout</MudButton>
@@ -127,7 +119,6 @@
     private List<CyEdge> _edges = [];
     private int[] _availableTiers = [];
     private int? _tierFilter;
-    private string? _focusModule;
     private ModuleInfo? _selectedModule;
     private string _clickDirection = "both";
     private bool _clickTransitive;
@@ -139,12 +130,13 @@
         _allModules = [.. SnapshotService.GetModulesSortedByTier()];
         _availableTiers = _allModules.Select(m => m.Tier).Distinct().Order().ToArray();
 
-        // Read persisted dim opacity
+        // Read persisted dim opacity (JS writes invariant dot-decimal; parse with InvariantCulture)
         try
         {
-            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
-            if (stored is not null && double.TryParse(stored, out var parsed))
-                _dimOpacity = parsed;
+            var raw = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
+            _dimOpacity = double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)
+                ? Math.Clamp(v, 0.0, 0.5) : 0.25;
         }
         catch { /* JS not yet available — keep default */ }
 
@@ -181,20 +173,6 @@
             .ToList();
     }
 
-    private static HashSet<string> GetDependents(string moduleId, IReadOnlyList<EdgeInfo> edges)
-    {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { moduleId };
-        bool changed = true;
-        while (changed)
-        {
-            changed = false;
-            foreach (var e in edges)
-                if (result.Contains(e.To) && result.Add(e.From))
-                    changed = true;
-        }
-        return result;
-    }
-
     private void OnNodeClicked(string nodeId)
     {
         _selectedModule = SnapshotService.GetModule(nodeId);
@@ -204,7 +182,6 @@
     private async Task OnBackgroundTapped()
     {
         _selectedModule = null;
-        _focusModule = null;
         if (_graph is not null)
             await _graph.ClearHighlightAsync();
         StateHasChanged();
@@ -226,21 +203,6 @@
     {
         _tierFilter = value;
         RebuildGraph();
-    }
-
-    private async Task OnFocusModuleChanged(string? value)
-    {
-        _focusModule = value;
-        if (string.IsNullOrEmpty(value))
-        {
-            if (_graph is not null)
-                await _graph.ClearHighlightAsync();
-        }
-        else if (_graph is not null)
-        {
-            var dependents = GetDependents(value, SnapshotService.Snapshot!.Edges).ToList();
-            await _graph.HighlightAsync(dependents);
-        }
     }
 
     private async Task OnClickDirectionChanged(string value)
@@ -273,7 +235,6 @@
     private async Task ResetFilters()
     {
         _tierFilter = null;
-        _focusModule = null;
         _selectedModule = null;
         _clickDirection = "both";
         _clickTransitive = false;
