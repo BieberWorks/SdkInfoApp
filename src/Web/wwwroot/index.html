@@ -9,15 +9,15 @@
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
     <style>
         /* Pre-boot splash. Defaults to dark; honors the persisted light/dark preference. */
-        html, body { margin: 0; background: #1a1a27; }
-        html.preload-light, html.preload-light body { background: #ffffff; }
+        html, body { margin: 0; }
 
         .preload-splash {
             display: flex; flex-direction: column; gap: 18px;
             justify-content: center; align-items: center; height: 100vh;
             font-family: 'Roboto', sans-serif; color: #b9b9c9;
+            background: #1a1a27;
         }
-        html.preload-light .preload-splash { color: #5a5a66; }
+        html.preload-light .preload-splash { background: #ffffff; color: #5a5a66; }
 
         .preload-spinner {
             width: 42px; height: 42px; border-radius: 50%;
