@@ -21,7 +21,7 @@
 <MudPaper Class="pa-2 mb-3" Elevation="1">
     <MudGrid Spacing="2">
         <MudItem xs="12" sm="4">
-            <MudSelect T="int?" Label="Filter by Tier" @bind-Value="_tierFilter" Clearable="true">
+            <MudSelect T="int?" Label="Filter by Tier" Value="_tierFilter" ValueChanged="OnTierFilterChanged" Clearable="true">
                 @foreach (var tier in _availableTiers)
                 {
                     <MudSelectItem T="int?" Value="@((int?)tier)">Tier @tier</MudSelectItem>
@@ -29,7 +29,7 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="4">
-            <MudSelect T="string?" Label="Highlight dependents of" @bind-Value="_focusModule" Clearable="true">
+            <MudSelect T="string?" Label="Highlight dependents of" Value="_focusModule" ValueChanged="OnFocusModuleChanged" Clearable="true">
                 @foreach (var m in _allModules)
                 {
                     <MudSelectItem T="string?" Value="@m.Id">@m.Id</MudSelectItem>
@@ -170,6 +170,18 @@
     {
         if (_selectedModule is not null)
             Nav.NavigateTo($"/modules/{_selectedModule.Id}");
+    }
+
+    private void OnTierFilterChanged(int? value)
+    {
+        _tierFilter = value;
+        RebuildGraph();
+    }
+
+    private void OnFocusModuleChanged(string? value)
+    {
+        _focusModule = value;
+        RebuildGraph();
     }
 
     private void ResetFilters()
