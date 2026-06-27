@@ -87,6 +87,30 @@
             await _module.InvokeVoidAsync("setCombineMode", _elementId, mode);
     }
 
+    public async Task FitAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("fitGraph", _elementId);
+    }
+
+    public async Task ZoomInAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("zoomByFactor", _elementId, 1.25);
+    }
+
+    public async Task ZoomOutAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("zoomByFactor", _elementId, 0.8);
+    }
+
+    public async Task ToggleFullscreenAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("toggleFullscreen", _elementId);
+    }
+
     public async Task ExportPngAsync(string filename)
     {
         if (_initialized && _module is not null)

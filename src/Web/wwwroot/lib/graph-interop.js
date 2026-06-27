@@ -114,6 +114,19 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
   };
   instances.set(elementId, inst);
 
+  // fullscreenchange: resize cy so it fills / exits correctly
+  const onFullscreenChange = () => {
+    const active = document.fullscreenElement;
+    const target = active ? instances.get(active.id) : inst;
+    if (target) {
+      setTimeout(() => {
+        target.cy.resize();
+        target.cy.animate({ fit: { padding: 30 } }, { duration: 150 });
+      }, 80);
+    }
+  };
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+
   // dragfree: update livePositions in-memory only — no localStorage write
   cy.on('dragfree', 'node', (evt) => {
     const i = instances.get(elementId);
@@ -287,6 +300,25 @@ export function setCombineMode(elementId, mode) {
 
 export function getPersistedLayout(persistKey) {
   try { return localStorage.getItem(layoutStorageKey(persistKey)) || null; } catch { return null; }
+}
+
+export function fitGraph(elementId) {
+  const inst = instances.get(elementId); const cy = inst && inst.cy; if (!cy) return;
+  cy.animate({ fit: { padding: 30 } }, { duration: 200 });
+}
+
+export function zoomByFactor(elementId, factor) {
+  const inst = instances.get(elementId); const cy = inst && inst.cy; if (!cy) return;
+  cy.animate({ zoom: { level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 120 });
+}
+
+export function toggleFullscreen(elementId) {
+  const el = document.getElementById(elementId); if (!el) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen();
+  } else {
+    (el.requestFullscreen ? el.requestFullscreen() : (el.webkitRequestFullscreen && el.webkitRequestFullscreen()));
+  }
 }
 
 export function exportPng(elementId, filename) {

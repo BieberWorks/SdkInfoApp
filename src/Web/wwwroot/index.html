@@ -26,6 +26,10 @@
             animation: preload-spin 0.9s linear infinite;
         }
         @keyframes preload-spin { to { transform: rotate(360deg); } }
+
+        /* Graph fullscreen: fill the viewport */
+        div[id^="cy-"]:fullscreen { width: 100% !important; height: 100vh !important; }
+        div[id^="cy-"]:-webkit-full-screen { width: 100% !important; height: 100vh !important; }
     </style>
     <script>
         // Apply the saved theme before first paint to avoid a flash.
