@@ -48,9 +48,13 @@
     <MudGrid Spacing="2">
         <MudItem xs="12" sm="3">
             <MudSelect T="string" Label="Arrangement" Value="_layoutMode" ValueChanged="OnLayoutModeChanged">
-                <MudSelectItem T="string" Value="@("cose")">Force-directed</MudSelectItem>
                 <MudSelectItem T="string" Value="@("dagre")">Hierarchical</MudSelectItem>
+                <MudSelectItem T="string" Value="@("dagre-lr")">Hierarchical L→R</MudSelectItem>
+                <MudSelectItem T="string" Value="@("breadthfirst")">Tree (Breadthfirst)</MudSelectItem>
+                <MudSelectItem T="string" Value="@("cose")">Force-directed</MudSelectItem>
+                <MudSelectItem T="string" Value="@("concentric-tier")">Concentric by Tier</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-tier")">Grid by Tier</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-module")">Grid by Module</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-name")">Grid A–Z</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-dependents")">Grid by Dependents</MudSelectItem>
                 <MudSelectItem T="string" Value="@("circle")">Circle</MudSelectItem>
@@ -78,8 +82,6 @@
             </div>
         </MudItem>
         <MudItem xs="12" sm="2" Class="d-flex align-center gap-1 flex-wrap">
-            <MudIconButton Icon="@Icons.Material.Filled.Download" Title="Export PNG"
-                           OnClick="ExportPng" Size="Size.Small" />
             <MudIconButton Icon="@Icons.Material.Filled.Save" Title="Save Layout"
                            OnClick="SaveLayout" Size="Size.Small" />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ResetFilters">Reset</MudButton>
@@ -100,7 +102,7 @@
 
 <div style="position:relative;">
     <CytoscapeGraph @ref="_graph" Nodes="@_nodes" Edges="@_edges" Height="650px"
-                    PersistKey="packages" Layout="@_layoutMode"
+                    PersistKey="packages" Layout="@_layoutMode" ExportFileName="sdk-package-graph.png"
                     OnNodeClicked="OnNodeClicked" OnBackgroundTapped="OnBackgroundTapped" />
 
     @if (_selectedPackage is not null)
@@ -188,6 +190,7 @@
                 Tier = p.Tier,
                 CiStatus = null,
                 HasLocalDev = false,
+                Group = p.Module,
             })
             .ToList();
 
@@ -288,12 +291,6 @@
     {
         _selectedPackage = null;
         StateHasChanged();
-    }
-
-    private async Task ExportPng()
-    {
-        if (_graph is not null)
-            await _graph.ExportPngAsync("sdk-package-graph.png");
     }
 
     private async Task ResetFilters()

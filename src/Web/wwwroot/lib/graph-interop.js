@@ -177,6 +177,7 @@ export function setData(elementId, nodes, edges) {
         tier: n.tier,
         ciStatus: n.ciStatus,
         hasLocalDev: n.hasLocalDev,
+        group: n.group,
       }
     })),
     ...edges.map(e => ({
@@ -461,6 +462,46 @@ function buildLayout(cy, layoutName) {
     }
     case 'circle':
       return cy.layout({ name: 'circle', fit: true, padding: 20 });
+    case 'concentric-tier':
+      return cy.layout({
+        name: 'concentric',
+        animate: false,
+        fit: true,
+        padding: 30,
+        minNodeSpacing: 25,
+        levelWidth: () => 1,
+        concentric: n => 10 - (n.data('tier') || 0),
+      });
+    case 'breadthfirst':
+      return cy.layout({
+        name: 'breadthfirst',
+        directed: true,
+        animate: false,
+        fit: true,
+        padding: 30,
+        spacingFactor: 1.0,
+      });
+    case 'dagre-lr':
+      return cy.layout({
+        name: 'dagre',
+        rankDir: 'LR',
+        nodeSep: 60,
+        rankSep: 80,
+        padding: 20,
+        animate: true,
+        animationDuration: 300,
+      });
+    case 'grid-module':
+      return cy.layout({
+        name: 'grid',
+        avoidOverlap: true,
+        padding: 20,
+        fit: true,
+        sort: (a, b) =>
+          (a.data('tier') - b.data('tier')) ||
+          String(a.data('group') || '').localeCompare(String(b.data('group') || '')) ||
+          String(a.data('label')).localeCompare(String(b.data('label'))),
+      });
     default: // 'dagre'
       return cy.layout({
         name: 'dagre',

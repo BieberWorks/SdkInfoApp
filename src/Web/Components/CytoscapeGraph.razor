@@ -11,6 +11,7 @@
             <MudIconButton Icon="@Icons.Material.Filled.Remove" Size="Size.Small" Title="Zoom out" OnClick="ZoomOutAsync" />
             <MudIconButton Icon="@Icons.Material.Filled.CenterFocusStrong" Size="Size.Small" Title="Fit to view" OnClick="FitAsync" />
             <MudIconButton Icon="@Icons.Material.Filled.Fullscreen" Size="Size.Small" Title="Fullscreen" OnClick="ToggleFullscreenAsync" />
+            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small" Title="Export PNG" OnClick="ExportClick" />
         </MudPaper>
     }
 </div>
@@ -22,6 +23,7 @@
     [Parameter] public string PersistKey { get; set; } = "default";
     [Parameter] public string Layout { get; set; } = "dagre";
     [Parameter] public bool ShowControls { get; set; } = true;
+    [Parameter] public string ExportFileName { get; set; } = "graph.png";
     [Parameter] public EventCallback<string> OnNodeClicked { get; set; }
     [Parameter] public EventCallback OnBackgroundTapped { get; set; }
 
@@ -124,6 +126,8 @@
         if (_initialized && _module is not null)
             await _module.InvokeVoidAsync("toggleFullscreen", _wrapperId);
     }
+
+    private async Task ExportClick() => await ExportPngAsync(ExportFileName);
 
     public async Task ExportPngAsync(string filename)
     {

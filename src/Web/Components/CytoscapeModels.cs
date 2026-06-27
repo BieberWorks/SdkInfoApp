@@ -9,6 +9,7 @@ public sealed record CyNode
     [JsonPropertyName("tier")] public int Tier { get; init; }
     [JsonPropertyName("ciStatus")] public string? CiStatus { get; init; }
     [JsonPropertyName("hasLocalDev")] public bool HasLocalDev { get; init; }
+    [JsonPropertyName("group")] public string Group { get; init; } = "";
 }
 
 public sealed record CyEdge
