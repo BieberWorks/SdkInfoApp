@@ -1,0 +1,41 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div id="@_elementId" style="width: 100%; height: @Height; border: 1px solid var(--mud-palette-lines-default); border-radius: 4px;"></div>
+
+@code {
+    [Parameter] public IReadOnlyList<CyNode> Nodes { get; set; } = [];
+    [Parameter] public IReadOnlyList<CyEdge> Edges { get; set; } = [];
+    [Parameter] public string Height { get; set; } = "600px";
+    [Parameter] public EventCallback<string> OnNodeClicked { get; set; }
+
+    private readonly string _elementId = $"cy-{Guid.NewGuid():N}";
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<CytoscapeGraph>? _dotNetRef;
+    private bool _initialized;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./lib/graph-interop.js");
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initGraph", _elementId, _dotNetRef);
+            _initialized = true;
+        }
+
+        if (_initialized && _module is not null)
+        {
+            await _module.InvokeVoidAsync("setData", _elementId, Nodes, Edges);
+        }
+    }
+
+    [JSInvokable]
+    public Task NodeClickedAsync(string nodeId) => OnNodeClicked.InvokeAsync(nodeId);
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+        if (_module is not null) await _module.DisposeAsync();
+    }
+}

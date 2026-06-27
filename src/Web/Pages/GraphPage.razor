@@ -1,0 +1,183 @@
+@page "/graph"
+@inject SnapshotService SnapshotService
+@inject NavigationManager Nav
+
+<PageTitle>Module Graph</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-2">Module Dependency Graph</MudText>
+
+@if (!SnapshotService.IsLoaded)
+{
+    <MudProgressCircular Indeterminate="true" />
+    return;
+}
+
+@if (SnapshotService.Snapshot is null)
+{
+    <MudAlert Severity="Severity.Warning">No snapshot loaded.</MudAlert>
+    return;
+}
+
+<MudPaper Class="pa-2 mb-3" Elevation="1">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="4">
+            <MudSelect T="int?" Label="Filter by Tier" @bind-Value="_tierFilter" Clearable="true">
+                @foreach (var tier in _availableTiers)
+                {
+                    <MudSelectItem T="int?" Value="@((int?)tier)">Tier @tier</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudSelect T="string?" Label="Highlight dependents of" @bind-Value="_focusModule" Clearable="true">
+                @foreach (var m in _allModules)
+                {
+                    <MudSelectItem T="string?" Value="@m.Id">@m.Id</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudDrawer @bind-Open="_drawerOpen" Anchor="Anchor.Right" Width="360px" Elevation="2">
+    @if (_selectedModule is not null)
+    {
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6" Class="mb-2">@_selectedModule.Id</MudText>
+            <MudChip T="string" Color="Color.Primary" Size="Size.Small" Class="mb-2">Tier @_selectedModule.Tier</MudChip>
+            <CiStatusChip Status="@_selectedModule.CiStatus" />
+            <MudDivider Class="my-2" />
+            <VersionBadge GhVersion="@_selectedModule.LatestGhVersion"
+                          LocalDevVersion="@_selectedModule.LocalDevVersion"
+                          ShowLocalDev="@SnapshotService.IsLocalMode" />
+            @if (!string.IsNullOrEmpty(_selectedModule.Description))
+            {
+                <MudText Typo="Typo.body2" Class="mt-2">@_selectedModule.Description</MudText>
+            }
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.subtitle2">Packages</MudText>
+            @foreach (var pkg in _selectedModule.Packages)
+            {
+                <MudText Typo="Typo.caption" Style="font-family: monospace;">@pkg</MudText><br />
+            }
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.subtitle2">Depends on</MudText>
+            @foreach (var edge in SnapshotService.GetEdgesFrom(_selectedModule.Id))
+            {
+                <MudText Typo="Typo.caption">→ @edge.To (@edge.Kind)</MudText><br />
+            }
+            <MudText Typo="Typo.subtitle2" Class="mt-1">Used by</MudText>
+            @foreach (var edge in SnapshotService.GetEdgesTo(_selectedModule.Id))
+            {
+                <MudText Typo="Typo.caption">← @edge.From (@edge.Kind)</MudText><br />
+            }
+            <MudButton Class="mt-3" Variant="Variant.Outlined" Size="Size.Small"
+                       OnClick="NavigateToDetail">
+                Full Details
+            </MudButton>
+        </MudPaper>
+    }
+</MudDrawer>
+
+<CytoscapeGraph Nodes="@_nodes" Edges="@_edges" Height="650px" OnNodeClicked="OnNodeClicked" />
+
+@code {
+    private List<ModuleInfo> _allModules = [];
+    private List<CyNode> _nodes = [];
+    private List<CyEdge> _edges = [];
+    private int[] _availableTiers = [];
+    private int? _tierFilter;
+    private string? _focusModule;
+    private bool _drawerOpen;
+    private ModuleInfo? _selectedModule;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SnapshotService.LoadAsync();
+        _allModules = [.. SnapshotService.GetModulesSortedByTier()];
+        _availableTiers = _allModules.Select(m => m.Tier).Distinct().Order().ToArray();
+        RebuildGraph();
+    }
+
+    protected override void OnParametersSet() => RebuildGraph();
+
+    private void RebuildGraph()
+    {
+        var snapshot = SnapshotService.Snapshot;
+        if (snapshot is null) return;
+
+        var visibleModuleIds = _allModules
+            .Where(m => _tierFilter is null || m.Tier == _tierFilter)
+            .Select(m => m.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrEmpty(_focusModule))
+        {
+            var highlighted = GetRelated(_focusModule, snapshot.Edges);
+            visibleModuleIds.IntersectWith(highlighted);
+        }
+
+        _nodes = _allModules
+            .Where(m => visibleModuleIds.Contains(m.Id))
+            .Select(m => new CyNode
+            {
+                Id = m.Id,
+                Label = m.Id.Replace("SDK-", ""),
+                Tier = m.Tier,
+                CiStatus = m.CiStatus,
+                HasLocalDev = m.LocalDevPresent,
+            })
+            .ToList();
+
+        var visibleIds = _nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _edges = snapshot.Edges
+            .Where(e => visibleIds.Contains(e.From) && visibleIds.Contains(e.To))
+            .Select(e => new CyEdge { Source = e.From, Target = e.To, Kind = e.Kind })
+            .ToList();
+    }
+
+    private static HashSet<string> GetRelated(string moduleId, IReadOnlyList<EdgeInfo> allEdges)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { moduleId };
+        var queue = new Queue<string>();
+        queue.Enqueue(moduleId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            foreach (var edge in allEdges)
+            {
+                if (edge.From == current && result.Add(edge.To)) queue.Enqueue(edge.To);
+                if (edge.To == current && result.Add(edge.From)) queue.Enqueue(edge.From);
+            }
+        }
+
+        return result;
+    }
+
+    private void OnNodeClicked(string nodeId)
+    {
+        _selectedModule = SnapshotService.GetModule(nodeId);
+        _drawerOpen = _selectedModule is not null;
+        StateHasChanged();
+    }
+
+    private void NavigateToDetail()
+    {
+        if (_selectedModule is not null)
+            Nav.NavigateTo($"/modules/{_selectedModule.Id}");
+    }
+
+    private void ResetFilters()
+    {
+        _tierFilter = null;
+        _focusModule = null;
+        _selectedModule = null;
+        _drawerOpen = false;
+        RebuildGraph();
+    }
+}

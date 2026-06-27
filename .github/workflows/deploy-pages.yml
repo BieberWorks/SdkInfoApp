@@ -1,0 +1,49 @@
+name: Deploy SDK Info to Pages
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Run Scanner (release mode)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet run --project src/Scanner --configuration Release \
+            -- --mode release --org BieberWorks --output sdk-snapshot.json
+
+      - name: Publish WASM
+        run: |
+          dotnet publish src/Web --configuration Release \
+            -p:GHPages=true \
+            --output publish/
+
+      - name: Copy snapshot into wwwroot
+        run: cp sdk-snapshot.json publish/wwwroot/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: publish/wwwroot/
+      - id: deployment
+        uses: actions/deploy-pages@v4

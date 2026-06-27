@@ -1,0 +1,157 @@
+@page "/modules"
+@page "/modules/{ModuleId}"
+@inject SnapshotService SnapshotService
+@inject NavigationManager Nav
+
+<PageTitle>@(Module is not null ? Module.Id : "Modules") — SDK Info</PageTitle>
+
+@if (!SnapshotService.IsLoaded)
+{
+    <MudProgressCircular Indeterminate="true" />
+    return;
+}
+
+@if (string.IsNullOrEmpty(ModuleId))
+{
+    <MudText Typo="Typo.h4" Class="mb-4">All Modules</MudText>
+    <MudGrid Spacing="2">
+        @foreach (var m in SnapshotService.GetModulesSortedByTier())
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <ModuleCard Module="@m" OnViewDetails="NavigateToDetail" />
+            </MudItem>
+        }
+    </MudGrid>
+    return;
+}
+
+@if (Module is null)
+{
+    <MudAlert Severity="Severity.Warning">Module '@ModuleId' not found.</MudAlert>
+    <MudButton OnClick="NavigateToList">Back to list</MudButton>
+    return;
+}
+
+<MudBreadcrumbs Items="_breadcrumbs" Class="mb-3" />
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="8">
+        <MudPaper Class="pa-4" Elevation="2">
+            <div class="d-flex align-center gap-2 mb-3">
+                <MudText Typo="Typo.h4">@Module.Id</MudText>
+                <MudChip T="string" Color="Color.Primary">Tier @Module.Tier</MudChip>
+                <CiStatusChip Status="@Module.CiStatus" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(Module.Description))
+            {
+                <MudText Typo="Typo.body1" Class="mb-3">@Module.Description</MudText>
+            }
+
+            <VersionBadge GhVersion="@Module.LatestGhVersion"
+                          LocalDevVersion="@Module.LocalDevVersion"
+                          ShowLocalDev="@SnapshotService.IsLocalMode" />
+
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.h6" Class="mb-1">Packages</MudText>
+            @foreach (var pkg in Module.Packages)
+            {
+                <MudText Typo="Typo.body2" Style="font-family: monospace;">@pkg</MudText>
+            }
+
+            @if (Module.Tags.Count > 0)
+            {
+                <MudDivider Class="my-3" />
+                <MudText Typo="Typo.h6" Class="mb-1">Tags</MudText>
+                <div class="d-flex flex-wrap gap-1">
+                    @foreach (var tag in Module.Tags)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@tag</MudChip>
+                    }
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4 mb-3" Elevation="1">
+            <MudText Typo="Typo.h6" Class="mb-2">Depends On</MudText>
+            @{
+                var depsFrom = SnapshotService.GetEdgesFrom(Module.Id).ToList();
+            }
+            @if (depsFrom.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No upstream dependencies</MudText>
+            }
+            @foreach (var edge in depsFrom)
+            {
+                <div class="d-flex align-center gap-1 mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="@(edge.Kind == "contracts" ? Color.Info : Color.Default)">
+                        @edge.Kind
+                    </MudChip>
+                    <MudLink Href="@($"/modules/{edge.To}")">@edge.To</MudLink>
+                </div>
+            }
+        </MudPaper>
+
+        <MudPaper Class="pa-4" Elevation="1">
+            <MudText Typo="Typo.h6" Class="mb-2">Used By</MudText>
+            @{
+                var depsTo = SnapshotService.GetEdgesTo(Module.Id).ToList();
+            }
+            @if (depsTo.Count == 0)
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Not referenced by any other module</MudText>
+            }
+            @foreach (var edge in depsTo)
+            {
+                <div class="d-flex align-center gap-1 mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="@(edge.Kind == "contracts" ? Color.Info : Color.Default)">
+                        @edge.Kind
+                    </MudChip>
+                    <MudLink Href="@($"/modules/{edge.From}")">@edge.From</MudLink>
+                </div>
+            }
+        </MudPaper>
+
+        @if (!string.IsNullOrEmpty(Module.GhReleasesUrl))
+        {
+            <MudPaper Class="pa-4 mt-3" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-2">Links</MudText>
+                <MudLink Href="@Module.GhReleasesUrl" Target="_blank">GitHub Releases</MudLink><br />
+                @if (!string.IsNullOrEmpty(Module.GhDocsUrl))
+                {
+                    <MudLink Href="@Module.GhDocsUrl" Target="_blank">Documentation</MudLink>
+                }
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter] public string? ModuleId { get; set; }
+
+    private ModuleInfo? Module => string.IsNullOrEmpty(ModuleId)
+        ? null
+        : SnapshotService.GetModule(ModuleId);
+
+    private List<BreadcrumbItem> _breadcrumbs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SnapshotService.LoadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        _breadcrumbs =
+        [
+            new BreadcrumbItem("Modules", href: "/modules"),
+            new BreadcrumbItem(ModuleId ?? "", href: null, disabled: true),
+        ];
+    }
+
+    private void NavigateToDetail(string id) => Nav.NavigateTo($"/modules/{id}");
+
+    private void NavigateToList() => Nav.NavigateTo("/modules");
+}

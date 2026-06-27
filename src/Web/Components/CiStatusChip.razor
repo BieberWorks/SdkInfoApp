@@ -1,0 +1,14 @@
+@{
+    var (color, icon, label) = Status switch
+    {
+        "success" => (Color.Success, Icons.Material.Filled.CheckCircle, "CI OK"),
+        "failure" => (Color.Error, Icons.Material.Filled.Cancel, "CI Failed"),
+        "in_progress" => (Color.Warning, Icons.Material.Filled.Pending, "Running"),
+        _ => (Color.Default, Icons.Material.Filled.HelpOutline, "Unknown"),
+    };
+}
+<MudChip T="string" Size="Size.Small" Color="@color" Icon="@icon">@label</MudChip>
+
+@code {
+    [Parameter] public string? Status { get; set; }
+}

@@ -1,0 +1,27 @@
+<span class="d-flex align-center gap-1">
+    @if (!string.IsNullOrEmpty(GhVersion))
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Custom.Brands.GitHub">
+            v@GhVersion
+        </MudChip>
+    }
+    else
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">
+            no release
+        </MudChip>
+    }
+
+    @if (ShowLocalDev && !string.IsNullOrEmpty(LocalDevVersion))
+    {
+        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Icon="@Icons.Material.Filled.Build">
+            @LocalDevVersion (local)
+        </MudChip>
+    }
+</span>
+
+@code {
+    [Parameter] public string? GhVersion { get; set; }
+    [Parameter] public string? LocalDevVersion { get; set; }
+    [Parameter] public bool ShowLocalDev { get; set; }
+}

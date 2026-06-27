@@ -1,0 +1,107 @@
+@page "/"
+@inject SnapshotService SnapshotService
+@inject NavigationManager Nav
+
+<PageTitle>SDK Dashboard</PageTitle>
+
+@if (!SnapshotService.IsLoaded)
+{
+    <MudProgressCircular Indeterminate="true" />
+    return;
+}
+
+@if (SnapshotService.Error is not null)
+{
+    <MudAlert Severity="Severity.Error">
+        Failed to load sdk-snapshot.json: @SnapshotService.Error
+        <br />
+        Run <code>dotnet run --project src/Scanner -- --mode local --output src/Web/wwwroot/sdk-snapshot.json</code>
+    </MudAlert>
+    return;
+}
+
+@{
+    var snapshot = SnapshotService.Snapshot!;
+    var modules = SnapshotService.GetModulesSortedByTier();
+    var withManifest = modules.Count(m => m.ManifestSource == "file");
+    var unpushed = modules.Where(m => m.LocalDevPresent).ToList();
+    var ciOk = modules.Count(m => m.CiStatus == "success");
+    var ciFailed = modules.Count(m => m.CiStatus == "failure");
+}
+
+<MudText Typo="Typo.h4" Class="mb-4">SDK Dashboard</MudText>
+
+<MudGrid Spacing="3" Class="mb-4">
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Elevation="1">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Modules</MudText>
+            <MudText Typo="Typo.h4">@modules.Count</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Elevation="1">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Manifest Coverage</MudText>
+            <MudText Typo="Typo.h4">@withManifest / @modules.Count</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Elevation="1">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">CI OK</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Success">@ciOk</MudText>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudPaper Class="pa-4" Elevation="1">
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">CI Failed</MudText>
+            <MudText Typo="Typo.h4" Color="Color.Error">@ciFailed</MudText>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-4">
+    Snapshot: @snapshot.SnapshotMode — generated @snapshot.GeneratedAt.ToLocalTime().ToString("g")
+</MudText>
+
+<DevOnlyPanel>
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        <MudText Typo="Typo.subtitle2">Local Dev Mode</MudText>
+        <MudText Typo="Typo.body2">
+            Refresh snapshot: <code>dotnet run --project src/Scanner -- --mode local --output src/Web/wwwroot/sdk-snapshot.json</code>
+        </MudText>
+        @if (unpushed.Count > 0)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mt-2">Modules with unpushed local -dev builds (@unpushed.Count):</MudText>
+            <MudList T="string" Dense="true">
+                @foreach (var m in unpushed.OrderBy(m => m.Tier))
+                {
+                    <MudListItem T="string">
+                        <span class="d-flex gap-2">
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary">Tier @m.Tier</MudChip>
+                            @m.Id
+                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">@m.LocalDevVersion</MudChip>
+                        </span>
+                    </MudListItem>
+                }
+            </MudList>
+        }
+    </MudAlert>
+</DevOnlyPanel>
+
+<MudText Typo="Typo.h5" Class="mb-2">All Modules</MudText>
+<MudGrid Spacing="2">
+    @foreach (var module in modules)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <ModuleCard Module="@module" OnViewDetails="NavigateToDetail" />
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await SnapshotService.LoadAsync();
+    }
+
+    private void NavigateToDetail(string id) => Nav.NavigateTo($"/modules/{id}");
+}

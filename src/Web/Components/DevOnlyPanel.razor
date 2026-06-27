@@ -1,0 +1,10 @@
+@inject SnapshotService SnapshotService
+
+@if (SnapshotService.IsLocalMode)
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -1,0 +1,45 @@
+@inject SnapshotService SnapshotService
+
+<MudCard Elevation="2" Class="mb-2">
+    <MudCardHeader>
+        <CardHeaderContent>
+            <div class="d-flex align-center gap-2">
+                <MudText Typo="Typo.h6">@Module.Id</MudText>
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary">Tier @Module.Tier</MudChip>
+                <CiStatusChip Status="@Module.CiStatus" />
+            </div>
+        </CardHeaderContent>
+    </MudCardHeader>
+    <MudCardContent>
+        @if (!string.IsNullOrEmpty(Module.Description))
+        {
+            <MudText Typo="Typo.body2" Class="mb-2">@Module.Description</MudText>
+        }
+        <div class="d-flex flex-wrap gap-1 mb-1">
+            <VersionBadge GhVersion="@Module.LatestGhVersion" LocalDevVersion="@Module.LocalDevVersion"
+                          ShowLocalDev="@SnapshotService.IsLocalMode" />
+        </div>
+        @if (Module.Tags.Count > 0)
+        {
+            <div class="d-flex flex-wrap gap-1 mt-1">
+                @foreach (var tag in Module.Tags)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@tag</MudChip>
+                }
+            </div>
+        }
+    </MudCardContent>
+    @if (OnViewDetails.HasDelegate)
+    {
+        <MudCardActions>
+            <MudButton Size="Size.Small" OnClick="() => OnViewDetails.InvokeAsync(Module.Id)">
+                Details
+            </MudButton>
+        </MudCardActions>
+    }
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public ModuleInfo Module { get; set; } = null!;
+    [Parameter] public EventCallback<string> OnViewDetails { get; set; }
+}

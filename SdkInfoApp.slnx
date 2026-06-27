@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Scanner.Model/Scanner.Model.csproj" />
+    <Project Path="src/Scanner/Scanner.csproj" />
+    <Project Path="src/Web/Web.csproj" />
+  </Folder>
+</Solution>
