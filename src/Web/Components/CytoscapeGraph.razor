@@ -93,6 +93,12 @@
             await _module.InvokeVoidAsync("exportPng", _elementId, filename);
     }
 
+    public async Task SaveLayoutAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("saveLayout", _elementId);
+    }
+
     public async Task<string?> GetPersistedLayoutAsync()
     {
         if (_initialized && _module is not null)

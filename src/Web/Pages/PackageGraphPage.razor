@@ -80,6 +80,8 @@
         <MudItem xs="12" sm="2" Class="d-flex align-center gap-1 flex-wrap">
             <MudIconButton Icon="@Icons.Material.Filled.Download" Title="Export PNG"
                            OnClick="ExportPng" Size="Size.Small" />
+            <MudIconButton Icon="@Icons.Material.Filled.Save" Title="Save Layout"
+                           OnClick="SaveLayout" Size="Size.Small" />
             <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="ResetFilters">Reset</MudButton>
             <MudButton Variant="Variant.Outlined" Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.GridView" OnClick="ResetLayout">Layout</MudButton>
@@ -308,6 +310,12 @@
             await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
             await _graph.SetCombineModeAsync(_combineMode);
         }
+    }
+
+    private async Task SaveLayout()
+    {
+        if (_graph is not null)
+            await _graph.SaveLayoutAsync();
     }
 
     private async Task ResetLayout()

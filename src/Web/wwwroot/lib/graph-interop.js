@@ -10,7 +10,9 @@ const TIER_COLORS = {
   5: '#795548',
 };
 
-// Map of elementId → { cy, persistKey, layoutName, clickDirection, clickTransitive, lastTappedId, baseIds, combineMode }
+// Map of elementId → instance state
+// { cy, persistKey, currentArrangement, livePositions (Map<id,{x,y}>),
+//   clickDirection, clickTransitive, lastTappedId, baseIds, combineMode }
 const instances = new Map();
 
 const DIM_OPACITY_KEY = 'sdkinfo.graph.dimOpacity';
@@ -24,35 +26,49 @@ function loadDimOpacity() {
 
 let dimOpacity = loadDimOpacity();
 
-// ─── localStorage helpers ────────────────────────────────────────────────────
-
-function storageKey(persistKey) {
-  return `sdkinfo.graph.pos.${persistKey}`;
-}
+// ─── localStorage key helpers ────────────────────────────────────────────────
 
 function layoutStorageKey(persistKey) {
   return `sdkinfo.graph.layout.${persistKey}`;
 }
 
-function loadPositions(persistKey) {
-  try {
-    const raw = localStorage.getItem(storageKey(persistKey));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+// Per-arrangement position key
+function posKey(persistKey, arrangement) {
+  return `sdkinfo.graph.pos.${persistKey}.${arrangement}`;
 }
 
-function savePositions(persistKey, cy) {
+function loadPositionsForArrangement(persistKey, arrangement) {
+  try {
+    const raw = localStorage.getItem(posKey(persistKey, arrangement));
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function savePositionsToStorage(persistKey, arrangement, livePositions) {
   try {
     const pos = {};
-    cy.nodes().forEach(n => { pos[n.id()] = n.position(); });
-    localStorage.setItem(storageKey(persistKey), JSON.stringify(pos));
-  } catch { /* quota exceeded etc. — silently ignore */ }
+    livePositions.forEach((p, id) => { pos[id] = p; });
+    localStorage.setItem(posKey(persistKey, arrangement), JSON.stringify(pos));
+  } catch { /* quota exceeded — silently ignore */ }
 }
 
-function clearPositions(persistKey) {
-  try { localStorage.removeItem(storageKey(persistKey)); } catch { }
+// ─── Internal: capture live positions from cy into inst.livePositions ────────
+
+function captureLivePositions(inst) {
+  inst.livePositions = new Map();
+  inst.cy.nodes().forEach(n => {
+    inst.livePositions.set(n.id(), { ...n.position() });
+  });
+}
+
+// ─── Internal: apply livePositions as preset (does not run a layout algo) ───
+
+function applyPresetFromLive(inst) {
+  inst.cy.nodes().forEach(n => {
+    const p = inst.livePositions.get(n.id());
+    if (p) n.position(p);
+  });
+  inst.cy.layout({ name: 'preset' }).run();
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -73,52 +89,64 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
     boxSelectionEnabled: false,
   });
 
-  // Persist node positions after dragging
-  cy.on('dragfree', 'node', () => {
-    const inst2 = instances.get(elementId);
-    if (inst2) savePositions(inst2.persistKey, cy);
-  });
+  // Read persisted arrangement choice
+  let resolvedLayout;
+  try { resolvedLayout = localStorage.getItem(layoutStorageKey(persistKey)) || layoutName || 'dagre'; }
+  catch { resolvedLayout = layoutName || 'dagre'; }
 
-  cy.on('tap', 'node', (evt) => {
-    const inst2 = instances.get(elementId);
-    if (!inst2) return;
-    const t = evt.target;
-    inst2.lastTappedId = t.id();
-    dotNetRef.invokeMethodAsync('NodeClickedAsync', t.id());
-    applyNodeTapHighlight(cy, t, inst2);
-  });
+  // Pre-load saved positions for this arrangement into livePositions (if available)
+  const savedForArrangement = loadPositionsForArrangement(persistKey, resolvedLayout);
+  const initialLive = new Map();
+  if (savedForArrangement) {
+    Object.entries(savedForArrangement).forEach(([id, p]) => initialLive.set(id, p));
+  }
 
-  cy.on('tap', (evt) => {
-    if (evt.target !== cy) return;
-    const inst2 = instances.get(elementId);
-    if (!inst2) return;
-    inst2.lastTappedId = null;
-    dotNetRef.invokeMethodAsync('BackgroundTappedAsync');
-    if (inst2.baseIds.size > 0) {
-      // Restore base highlight; keep chips in C#
-      applyBaseHighlight(cy, inst2.baseIds);
-    } else {
-      cy.elements().removeClass('highlighted dimmed');
-    }
-  });
-
-  const resolvedLayout = layoutName || 'dagre';
-  instances.set(elementId, {
+  const inst = {
     cy,
     persistKey,
-    layoutName: resolvedLayout,
+    currentArrangement: resolvedLayout,
+    livePositions: initialLive,
     clickDirection: 'both',
     clickTransitive: false,
     lastTappedId: null,
     baseIds: new Set(),
     combineMode: 'base',
+  };
+  instances.set(elementId, inst);
+
+  // dragfree: update livePositions in-memory only — no localStorage write
+  cy.on('dragfree', 'node', (evt) => {
+    const i = instances.get(elementId);
+    if (i) i.livePositions.set(evt.target.id(), { ...evt.target.position() });
+  });
+
+  cy.on('tap', 'node', (evt) => {
+    const i = instances.get(elementId);
+    if (!i) return;
+    const t = evt.target;
+    i.lastTappedId = t.id();
+    dotNetRef.invokeMethodAsync('NodeClickedAsync', t.id());
+    applyNodeTapHighlight(cy, t, i);
+  });
+
+  cy.on('tap', (evt) => {
+    if (evt.target !== cy) return;
+    const i = instances.get(elementId);
+    if (!i) return;
+    i.lastTappedId = null;
+    dotNetRef.invokeMethodAsync('BackgroundTappedAsync');
+    if (i.baseIds.size > 0) {
+      applyBaseHighlight(cy, i.baseIds);
+    } else {
+      cy.elements().removeClass('highlighted dimmed');
+    }
   });
 }
 
 export function setData(elementId, nodes, edges) {
   const inst = instances.get(elementId);
   if (!inst) return;
-  const { cy, persistKey } = inst;
+  const { cy } = inst;
 
   const elements = [
     ...nodes.map(n => ({
@@ -143,19 +171,17 @@ export function setData(elementId, nodes, edges) {
   cy.elements().remove();
   cy.add(elements);
 
-  const saved = loadPositions(persistKey);
+  // If livePositions covers all current nodes → restore from livePositions (no layout run)
   const nodeIds = nodes.map(n => n.id);
-  const allCovered = saved !== null && nodeIds.every(id => saved[id] !== undefined);
+  const allCoveredByLive = nodeIds.length > 0 &&
+    nodeIds.every(id => inst.livePositions.has(id));
 
-  if (allCovered) {
-    cy.nodes().forEach(n => {
-      const p = saved[n.id()];
-      if (p) n.position(p);
-    });
-    cy.layout({ name: 'preset' }).run();
+  if (allCoveredByLive) {
+    applyPresetFromLive(inst);
   } else {
-    const layout = buildLayout(cy, inst.layoutName);
-    layout.one('layoutstop', () => savePositions(persistKey, cy));
+    // Run the current arrangement layout; capture results into livePositions
+    const layout = buildLayout(cy, inst.currentArrangement);
+    layout.one('layoutstop', () => captureLivePositions(inst));
     layout.run();
   }
 }
@@ -175,22 +201,42 @@ export function resetHighlight(elementId) {
 export function resetLayout(elementId) {
   const inst = instances.get(elementId);
   if (!inst) return;
-  const { cy, persistKey, layoutName } = inst;
-  clearPositions(persistKey);
-  const layout = buildLayout(cy, layoutName);
-  layout.one('layoutstop', () => savePositions(persistKey, cy));
+  // Re-run current arrangement layout fresh; update livePositions (no localStorage write)
+  const layout = buildLayout(inst.cy, inst.currentArrangement);
+  layout.one('layoutstop', () => captureLivePositions(inst));
   layout.run();
 }
 
 export function applyLayout(elementId, mode) {
   const inst = instances.get(elementId);
   if (!inst) return;
-  inst.layoutName = mode;
+  inst.currentArrangement = mode;
+  // Persist the chosen arrangement name
   try { localStorage.setItem(layoutStorageKey(inst.persistKey), mode); } catch { }
-  clearPositions(inst.persistKey);
-  const layout = buildLayout(inst.cy, mode);
-  layout.one('layoutstop', () => savePositions(inst.persistKey, inst.cy));
-  layout.run();
+
+  // Try to restore saved positions for this arrangement
+  const saved = loadPositionsForArrangement(inst.persistKey, mode);
+  const nodeIds = new Set(inst.cy.nodes().map(n => n.id()));
+  const allCovered = saved !== null &&
+    nodeIds.size > 0 &&
+    [...nodeIds].every(id => saved[id] !== undefined);
+
+  if (allCovered) {
+    // Restore from saved
+    inst.livePositions = new Map(Object.entries(saved));
+    applyPresetFromLive(inst);
+  } else {
+    // Run fresh layout; capture into livePositions (no auto-save)
+    const layout = buildLayout(inst.cy, mode);
+    layout.one('layoutstop', () => captureLivePositions(inst));
+    layout.run();
+  }
+}
+
+export function saveLayout(elementId) {
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  savePositionsToStorage(inst.persistKey, inst.currentArrangement, inst.livePositions);
 }
 
 export function setClickMode(elementId, direction, transitive) {
@@ -275,12 +321,10 @@ function applyNodeTapHighlight(cy, node, inst) {
   const focus = computeDirectedSet(cy, node, inst.clickDirection, inst.clickTransitive);
 
   if (inst.baseIds.size === 0) {
-    // No base — just show focus
     applyCollectionHighlight(cy, focus);
     return;
   }
 
-  // Have base: combine modes
   const baseCol = cy.collection(
     [...inst.baseIds].map(id => cy.getElementById(id)).filter(el => el.length > 0)
   );
@@ -289,13 +333,11 @@ function applyNodeTapHighlight(cy, node, inst) {
   if (inst.combineMode === 'union') {
     display = focus.union(baseCol);
   } else if (inst.combineMode === 'intersection') {
-    // intersection of node sets; keep edges between survivors
     const focusNodeIds = new Set(focus.nodes().map(n => n.id()));
     const baseNodeIds = new Set(baseCol.nodes().map(n => n.id()));
     const intersect = cy.nodes().filter(n => focusNodeIds.has(n.id()) && baseNodeIds.has(n.id()));
     display = intersect;
   } else {
-    // 'base' mode: focus only (base is just the fallback on background-tap)
     display = focus;
   }
 
@@ -368,7 +410,6 @@ function buildLayout(cy, layoutName) {
         sort: (a, b) => String(a.data('label')).localeCompare(String(b.data('label'))),
       });
     case 'grid-dependents': {
-      // Pre-compute in-degree (number of nodes that depend on each node)
       cy.nodes().forEach(n => n.data('_deg', n.indegree(false)));
       return cy.layout({
         name: 'grid',
