@@ -27,9 +27,9 @@
         }
         @keyframes preload-spin { to { transform: rotate(360deg); } }
 
-        /* Graph fullscreen: fill the viewport */
-        div[id^="cy-"]:fullscreen { width: 100% !important; height: 100vh !important; }
-        div[id^="cy-"]:-webkit-full-screen { width: 100% !important; height: 100vh !important; }
+        /* Graph fullscreen: wrapper fills the viewport; inner cy-div inherits 100%/100% */
+        div[id^="cyw-"]:fullscreen { width: 100% !important; height: 100vh !important; }
+        div[id^="cyw-"]:-webkit-full-screen { width: 100% !important; height: 100vh !important; }
     </style>
     <script>
         // Apply the saved theme before first paint to avoid a flash.

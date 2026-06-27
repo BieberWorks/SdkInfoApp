@@ -114,10 +114,18 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
   };
   instances.set(elementId, inst);
 
-  // fullscreenchange: resize cy so it fills / exits correctly
+  // fullscreenchange: resize cy so it fills / exits correctly.
+  // The fullscreen element is the wrapper (cyw-*); find the cy-div inside it.
   const onFullscreenChange = () => {
-    const active = document.fullscreenElement;
-    const target = active ? instances.get(active.id) : inst;
+    const wrapper = document.fullscreenElement;
+    let target;
+    if (wrapper) {
+      const cyDiv = wrapper.querySelector('div[id^="cy-"]');
+      target = cyDiv ? instances.get(cyDiv.id) : null;
+    } else {
+      // Exiting fullscreen — use this instance
+      target = inst;
+    }
     if (target) {
       setTimeout(() => {
         target.cy.resize();
@@ -312,8 +320,8 @@ export function zoomByFactor(elementId, factor) {
   cy.animate({ zoom: { level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } } }, { duration: 120 });
 }
 
-export function toggleFullscreen(elementId) {
-  const el = document.getElementById(elementId); if (!el) return;
+export function toggleFullscreen(wrapperId) {
+  const el = document.getElementById(wrapperId); if (!el) return;
   if (document.fullscreenElement) {
     document.exitFullscreen();
   } else {

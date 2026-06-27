@@ -78,14 +78,6 @@
             </div>
         </MudItem>
         <MudItem xs="12" sm="2" Class="d-flex align-center gap-1 flex-wrap">
-            <MudIconButton Icon="@Icons.Material.Filled.CenterFocusStrong" Title="Fit to view"
-                           OnClick="@(async () => { if (_graph is not null) await _graph.FitAsync(); })" Size="Size.Small" />
-            <MudIconButton Icon="@Icons.Material.Filled.Fullscreen" Title="Fullscreen"
-                           OnClick="@(async () => { if (_graph is not null) await _graph.ToggleFullscreenAsync(); })" Size="Size.Small" />
-            <MudIconButton Icon="@Icons.Material.Filled.Add" Title="Zoom in"
-                           OnClick="@(async () => { if (_graph is not null) await _graph.ZoomInAsync(); })" Size="Size.Small" />
-            <MudIconButton Icon="@Icons.Material.Filled.Remove" Title="Zoom out"
-                           OnClick="@(async () => { if (_graph is not null) await _graph.ZoomOutAsync(); })" Size="Size.Small" />
             <MudIconButton Icon="@Icons.Material.Filled.Download" Title="Export PNG"
                            OnClick="ExportPng" Size="Size.Small" />
             <MudIconButton Icon="@Icons.Material.Filled.Save" Title="Save Layout"
