@@ -8,6 +8,7 @@ string mode = "local";
 string workspace = @"C:\Users\biebe\source\repos\BieberWorks";
 string org = "BieberWorks";
 string output = "sdk-snapshot.json";
+string? branch = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -25,6 +26,9 @@ for (int i = 0; i < args.Length; i++)
         case "--output" when i + 1 < args.Length:
             output = args[++i];
             break;
+        case "--branch" when i + 1 < args.Length:
+            branch = args[++i];
+            break;
     }
 }
 
@@ -32,7 +36,7 @@ var app = new ScannerApp(loggerFactory);
 
 try
 {
-    await app.RunAsync(mode, workspace, org, output, CancellationToken.None);
+    await app.RunAsync(mode, workspace, org, output, branch, CancellationToken.None);
 }
 catch (Exception ex)
 {

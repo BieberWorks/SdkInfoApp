@@ -12,7 +12,8 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         Dictionary<string, RepoScanResult> repoInfos,
         Dictionary<string, string> localDevVersions,
         Dictionary<string, GhRepoData> ghDataMap,
-        string snapshotMode)
+        string snapshotMode,
+        string branch = "local")
     {
         var modules = new List<ModuleInfo>();
         var edges = new List<EdgeInfo>();
@@ -103,6 +104,7 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         return new SdkSnapshot
         {
             SnapshotMode = snapshotMode,
+            Branch = branch,
             GeneratedAt = DateTimeOffset.UtcNow,
             Modules = modules,
             Edges = edges,

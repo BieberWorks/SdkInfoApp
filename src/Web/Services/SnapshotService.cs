@@ -1,22 +1,50 @@
+using Microsoft.JSInterop;
 using SdkInfoApp.Scanner.Model;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SdkInfoApp.Web.Services;
 
-public sealed class SnapshotService(HttpClient http)
+/// <summary>Describes one entry in <c>snapshots/index.json</c>.</summary>
+public sealed record BranchInfo
 {
+    [JsonPropertyName("branch")]
+    public string Branch { get; init; } = "";
+
+    [JsonPropertyName("file")]
+    public string File { get; init; } = "";
+
+    [JsonPropertyName("generatedAt")]
+    public string? GeneratedAt { get; init; }
+}
+
+/// <summary>Schema for <c>snapshots/index.json</c>.</summary>
+file sealed record SnapshotIndex
+{
+    [JsonPropertyName("branches")]
+    public IReadOnlyList<BranchInfo> Branches { get; init; } = [];
+}
+
+public sealed class SnapshotService(HttpClient http, IJSRuntime js)
+{
+    private const string LocalStorageKey = "sdkinfo.branch";
+
     private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
 
     private SdkSnapshot? _snapshot;
     private bool _loaded;
     private string? _error;
     private Task? _loadTask;
+    private IReadOnlyList<BranchInfo> _branches = [];
+    private string _selectedBranch = "local";
 
     public SdkSnapshot? Snapshot => _snapshot;
     public bool IsLoaded => _loaded;
     public string? Error => _error;
-    public bool IsLocalMode => _snapshot?.SnapshotMode == "local";
+    public bool IsLocalMode => _snapshot?.Branch == "local";
+    public IReadOnlyList<BranchInfo> Branches => _branches;
+    public string SelectedBranch => _selectedBranch;
 
     public event Action? OnChange;
 
@@ -26,7 +54,40 @@ public sealed class SnapshotService(HttpClient http)
     {
         try
         {
-            _snapshot = await http.GetFromJsonAsync<SdkSnapshot>("sdk-snapshot.json", Options);
+            // Try loading index first
+            SnapshotIndex? index = null;
+            try
+            {
+                index = await http.GetFromJsonAsync<SnapshotIndex>("snapshots/index.json", Options);
+            }
+            catch
+            {
+                // No index — fall back to classic single-file mode
+            }
+
+            if (index is not null && index.Branches.Count > 0)
+            {
+                _branches = index.Branches;
+
+                // Determine selected branch from localStorage; default to first entry (main)
+                var stored = await js.InvokeAsync<string?>("localStorage.getItem", LocalStorageKey);
+                var desired = stored is not null && _branches.Any(b => b.Branch == stored)
+                    ? stored
+                    : _branches[0].Branch;
+
+                _selectedBranch = desired;
+                var entry = _branches.First(b => b.Branch == desired);
+                _snapshot = await http.GetFromJsonAsync<SdkSnapshot>(entry.File, Options);
+            }
+            else
+            {
+                // Classic fallback: sdk-snapshot.json in root
+                _snapshot = await http.GetFromJsonAsync<SdkSnapshot>("sdk-snapshot.json", Options);
+                var branchName = _snapshot?.Branch ?? "local";
+                _branches = [new BranchInfo { Branch = branchName, File = "sdk-snapshot.json" }];
+                _selectedBranch = branchName;
+            }
+
             _loaded = true;
         }
         catch (Exception ex)
@@ -36,6 +97,16 @@ public sealed class SnapshotService(HttpClient http)
         }
 
         OnChange?.Invoke();
+    }
+
+    /// <summary>
+    /// Persists <paramref name="branch"/> to localStorage and reloads the page so all
+    /// components reinitialize with the new snapshot.
+    /// </summary>
+    public async Task SelectBranchAsync(string branch)
+    {
+        await js.InvokeVoidAsync("localStorage.setItem", LocalStorageKey, branch);
+        await js.InvokeVoidAsync("location.reload");
     }
 
     public IReadOnlyList<ModuleInfo> GetModulesSortedByTier()

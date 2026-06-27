@@ -11,6 +11,9 @@ public sealed record SdkSnapshot
     [JsonPropertyName("snapshotMode")]
     public string SnapshotMode { get; init; } = "local";
 
+    [JsonPropertyName("branch")]
+    public string Branch { get; init; } = "local";
+
     [JsonPropertyName("generatedAt")]
     public DateTimeOffset GeneratedAt { get; init; }
 

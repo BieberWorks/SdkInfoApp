@@ -19,6 +19,7 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
         string workspace,
         string org,
         string output,
+        string? branch,
         CancellationToken ct)
     {
         LogRunning(mode);
@@ -26,7 +27,7 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
         SdkSnapshot snapshot = mode switch
         {
             "local" => await RunLocalAsync(workspace, ct),
-            "release" => await RunReleaseAsync(org, ct),
+            "release" => await RunReleaseAsync(org, branch, ct),
             _ => throw new ArgumentException($"Unknown mode: {mode}. Use 'local' or 'release'.")
         };
 
@@ -55,22 +56,23 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
 
         var ghDataMap = await ghFetcher.FetchAllAsync("BieberWorks", repoInfos.Keys, ct);
 
-        return builder.Build(repoInfos, localDevVersions, ghDataMap, "local");
+        return builder.Build(repoInfos, localDevVersions, ghDataMap, "local", "local");
     }
 
-    private async Task<SdkSnapshot> RunReleaseAsync(string org, CancellationToken ct)
+    private async Task<SdkSnapshot> RunReleaseAsync(string org, string? branch, CancellationToken ct)
     {
         var scanner = new ReleaseScanner(loggerFactory.CreateLogger<ReleaseScanner>());
         var ghFetcher = new GitHubDataFetcher(loggerFactory.CreateLogger<GitHubDataFetcher>());
         var builder = new SnapshotBuilder(loggerFactory.CreateLogger<SnapshotBuilder>());
 
-        var repoInfos = await scanner.ScanOrgAsync(org, ct);
+        var repoInfos = await scanner.ScanOrgAsync(org, ct, branch);
         LogFoundRepos(repoInfos.Count);
 
         var ghDataMap = await ghFetcher.FetchAllAsync(org, repoInfos.Keys, ct);
 
         // Release mode: no local feed; pass empty dict
-        var snapshot = builder.Build(repoInfos, [], ghDataMap, "release");
+        var snapshotBranch = branch ?? "default";
+        var snapshot = builder.Build(repoInfos, [], ghDataMap, "release", snapshotBranch);
         return SnapshotBuilder.SanitizeForRelease(snapshot);
     }
 

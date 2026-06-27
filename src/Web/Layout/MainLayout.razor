@@ -11,6 +11,30 @@
         <MudSpacer />
         @if (Snapshot.IsLoaded && Snapshot.Snapshot is not null)
         {
+            <MudMenu Icon="@Icons.Material.Filled.AccountTree" Color="Color.Inherit"
+                     Class="mr-1" Dense="true" AnchorOrigin="Origin.BottomLeft">
+                <ActivatorContent>
+                    <MudButton Color="Color.Inherit" EndIcon="@Icons.Material.Filled.ArrowDropDown"
+                               Size="Size.Small" Class="mr-1">
+                        @Snapshot.SelectedBranch
+                    </MudButton>
+                </ActivatorContent>
+                <ChildContent>
+                    @foreach (var info in Snapshot.Branches)
+                    {
+                        var branchName = info.Branch;
+                        <MudMenuItem OnClick="@(() => SelectBranchAsync(branchName))"
+                                     Disabled="@(branchName == Snapshot.SelectedBranch)">
+                            @if (branchName == Snapshot.SelectedBranch)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="mr-1" />
+                            }
+                            @branchName
+                        </MudMenuItem>
+                    }
+                </ChildContent>
+            </MudMenu>
+
             <MudChip T="string" Color="@(Snapshot.IsLocalMode ? Color.Warning : Color.Success)"
                      Size="Size.Small" Class="mr-2">
                 @(Snapshot.IsLocalMode ? "Local Dev" : "Release")
@@ -61,4 +85,7 @@
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
 
     private async Task ToggleTheme() => await ThemeService.ToggleAsync();
+
+    private async Task SelectBranchAsync(string branch) =>
+        await Snapshot.SelectBranchAsync(branch);
 }

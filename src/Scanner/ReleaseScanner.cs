@@ -19,8 +19,12 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
     /// <summary>
     /// Discovers all <c>SDK-*</c> repos in <paramref name="org"/> and scans each one
     /// for csproj-based package/edge data and an optional <c>module.manifest.json</c>.
+    /// When <paramref name="branch"/> is supplied, only that branch is read for every repo;
+    /// repos where the branch does not exist are skipped with a warning.
+    /// When <paramref name="branch"/> is <see langword="null"/>, the default branch of each repo is used.
     /// </summary>
-    public async Task<Dictionary<string, RepoScanResult>> ScanOrgAsync(string org, CancellationToken ct)
+    public async Task<Dictionary<string, RepoScanResult>> ScanOrgAsync(
+        string org, CancellationToken ct, string? branch = null)
     {
         var repoNames = await ListSdkReposAsync(org, ct);
         LogFoundRepos(org, repoNames.Count);
@@ -33,7 +37,7 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
             await semaphore.WaitAsync(ct);
             try
             {
-                var result = await ScanRepoAsync(org, repoId, ct);
+                var result = await ScanRepoAsync(org, repoId, branch, ct);
                 if (result is not null)
                     lock (results) results[repoId] = result;
             }
@@ -77,10 +81,26 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
         return names;
     }
 
-    private async Task<RepoScanResult?> ScanRepoAsync(string org, string repoId, CancellationToken ct)
+    private async Task<RepoScanResult?> ScanRepoAsync(
+        string org, string repoId, string? overrideBranch, CancellationToken ct)
     {
-        // 1. Determine default branch
-        var defaultBranch = await GetDefaultBranchAsync(org, repoId, ct);
+        // 1. Determine the branch to scan
+        string defaultBranch;
+        if (overrideBranch is not null)
+        {
+            // Check whether the requested branch exists in this repo
+            var exists = await BranchExistsAsync(org, repoId, overrideBranch, ct);
+            if (!exists)
+            {
+                LogBranchNotFound(repoId, overrideBranch);
+                return null;
+            }
+            defaultBranch = overrideBranch;
+        }
+        else
+        {
+            defaultBranch = await GetDefaultBranchAsync(org, repoId, ct);
+        }
 
         // 2. Get recursive file tree to find all *.csproj paths
         var csprojPaths = await GetCsprojPathsAsync(org, repoId, defaultBranch, ct);
@@ -129,6 +149,15 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
 
         LogRepoScanned(repoId, ownPackages.Count, manifest is not null);
         return new RepoScanResult(repoId, ownPackages, [], pkgEdges, manifest);
+    }
+
+    private async Task<bool> BranchExistsAsync(
+        string org, string repoId, string branch, CancellationToken ct)
+    {
+        var result = await RunGhApiAsync(
+            ["api", $"repos/{org}/{repoId}/branches/{branch}", "--jq", ".name"],
+            ct);
+        return !string.IsNullOrWhiteSpace(result);
     }
 
     private async Task<string> GetDefaultBranchAsync(string org, string repoId, CancellationToken ct)
@@ -277,6 +306,9 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Repo {RepoId}: {PackageCount} packages, hasManifest={HasManifest}")]
     private partial void LogRepoScanned(string repoId, int packageCount, bool hasManifest);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Repo {RepoId}: branch '{Branch}' not found — skipping")]
+    private partial void LogBranchNotFound(string repoId, string branch);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to scan repo {RepoId}: {Error}")]
     private partial void LogRepoScanError(string repoId, string error);

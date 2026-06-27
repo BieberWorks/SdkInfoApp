@@ -25,24 +25,68 @@ jobs:
         with:
           dotnet-version: '10.x'
 
-      - name: Run Scanner (release mode)
-        # SDK_READ_TOKEN must be a PAT with 'contents: read' on BieberWorks/SDK-* repos.
-        # The default GITHUB_TOKEN only has access to this repository and cannot read
-        # the private SDK-* repos in the BieberWorks org.
-        env:
-          GH_TOKEN: ${{ secrets.SDK_READ_TOKEN }}
-        run: |
-          dotnet run --project src/Scanner --configuration Release \
-            -- --mode release --org BieberWorks --output sdk-snapshot.json
-
       - name: Publish WASM
         run: |
           dotnet publish src/Web --configuration Release \
             -p:GHPages=true \
             --output publish/
 
-      - name: Copy snapshot into wwwroot
-        run: cp sdk-snapshot.json publish/wwwroot/
+      - name: Create snapshots directory
+        run: mkdir -p publish/wwwroot/snapshots
+
+      - name: Scan branches and build index
+        # SDK_READ_TOKEN must be a PAT with 'contents: read' on BieberWorks/SDK-* repos.
+        # The default GITHUB_TOKEN only has access to this repository and cannot read
+        # the private SDK-* repos in the BieberWorks org.
+        # Branches are scanned in priority order: main first (used as default in the app).
+        # If a branch produces an empty snapshot (no repos had that branch) it is excluded
+        # from index.json so the app never offers a branch with zero modules.
+        env:
+          GH_TOKEN: ${{ secrets.SDK_READ_TOKEN }}
+        run: |
+          GENERATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          INDEX_ENTRIES=""
+
+          for BRANCH in main staging dev; do
+            OUT="publish/wwwroot/snapshots/sdk-snapshot.${BRANCH}.json"
+            echo "--- Scanning branch: $BRANCH ---"
+
+            dotnet run --project src/Scanner --configuration Release \
+              -- --mode release --org BieberWorks \
+                 --branch "$BRANCH" \
+                 --output "$OUT" || true
+
+            # Verify the file was written and contains at least one module
+            if [ -f "$OUT" ]; then
+              MODULE_COUNT=$(python3 -c "
+          import json, sys
+          try:
+              d = json.load(open('$OUT'))
+              print(len(d.get('modules', [])))
+          except Exception:
+              print(0)
+          ")
+              echo "Branch $BRANCH: $MODULE_COUNT modules"
+              if [ "$MODULE_COUNT" -gt "0" ]; then
+                ENTRY="{\"branch\":\"${BRANCH}\",\"file\":\"snapshots/sdk-snapshot.${BRANCH}.json\",\"generatedAt\":\"${GENERATED_AT}\"}"
+                if [ -z "$INDEX_ENTRIES" ]; then
+                  INDEX_ENTRIES="$ENTRY"
+                else
+                  INDEX_ENTRIES="$INDEX_ENTRIES,$ENTRY"
+                fi
+              else
+                echo "Branch $BRANCH produced 0 modules — excluding from index"
+                rm -f "$OUT"
+              fi
+            else
+              echo "Branch $BRANCH: no output file produced — skipping"
+            fi
+          done
+
+          # Write index.json
+          echo "{\"branches\":[${INDEX_ENTRIES}]}" > publish/wwwroot/snapshots/index.json
+          echo "--- index.json ---"
+          cat publish/wwwroot/snapshots/index.json
 
       - name: Create 404.html SPA fallback
         # GitHub Pages returns 404.html for any path that does not exist.
