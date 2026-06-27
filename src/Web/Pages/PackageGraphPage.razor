@@ -1,0 +1,208 @@
+@page "/packages"
+@inject SnapshotService SnapshotService
+@inject NavigationManager Nav
+
+<PageTitle>Package Graph</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-2">Package Dependency Graph</MudText>
+
+@if (!SnapshotService.IsLoaded)
+{
+    <MudProgressCircular Indeterminate="true" />
+    return;
+}
+
+@if (SnapshotService.Snapshot is null || SnapshotService.Snapshot.PackageNodes.Count == 0)
+{
+    <MudAlert Severity="Severity.Warning">
+        No package data in snapshot. Re-run Scanner to generate it.
+    </MudAlert>
+    return;
+}
+
+<MudPaper Class="pa-2 mb-3" Elevation="1">
+    <MudGrid Spacing="2">
+        <MudItem xs="12" sm="4">
+            <MudSelect T="string?" Label="Filter by module" Value="_moduleFilter"
+                       ValueChanged="OnModuleFilterChanged" Clearable="true">
+                @foreach (var m in _allModules)
+                {
+                    <MudSelectItem T="string?" Value="@m">@m</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudSelect T="string?" Label="Highlight dependents of" Value="_focusPackage"
+                       ValueChanged="OnFocusPackageChanged" Clearable="true">
+                @foreach (var p in _allPackageNodes)
+                {
+                    <MudSelectItem T="string?" Value="@p.Id">@ShortLabel(p.Id)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters" Class="mr-2">Reset</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
+                       OnClick="ResetLayout">Reset Layout</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<div style="position:relative;">
+    <CytoscapeGraph @ref="_graph" Nodes="@_nodes" Edges="@_edges" Height="650px"
+                    PersistKey="packages" Layout="cose"
+                    OnNodeClicked="OnNodeClicked" OnBackgroundTapped="OnBackgroundTapped" />
+
+    @if (_selectedPackage is not null)
+    {
+        <MudPaper Class="pa-4" Elevation="4"
+                  Style="position:absolute; top:8px; right:8px; width:360px; max-height:calc(100% - 16px); overflow:auto; z-index:5;">
+            <div class="d-flex justify-space-between align-center mb-2">
+                <MudText Typo="Typo.subtitle1" Style="word-break:break-all;">@_selectedPackage.Id</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseDetail" />
+            </div>
+            <div class="d-flex align-center gap-1 mb-2">
+                <MudChip T="string" Color="Color.Secondary" Size="Size.Small">@_selectedPackage.Module</MudChip>
+                <MudChip T="string" Color="Color.Primary" Size="Size.Small">Tier @_selectedPackage.Tier</MudChip>
+            </div>
+            <MudDivider Class="my-2" />
+            <MudText Typo="Typo.subtitle2">Depends on</MudText>
+            @foreach (var edge in SnapshotService.GetPackageEdgesFrom(_selectedPackage.Id))
+            {
+                <MudText Typo="Typo.caption">→ @ShortLabel(edge.To) (@edge.Kind)</MudText><br />
+            }
+            <MudText Typo="Typo.subtitle2" Class="mt-1">Used by</MudText>
+            @foreach (var edge in SnapshotService.GetPackageEdgesTo(_selectedPackage.Id))
+            {
+                <MudText Typo="Typo.caption">← @ShortLabel(edge.From) (@edge.Kind)</MudText><br />
+            }
+        </MudPaper>
+    }
+</div>
+
+@code {
+    private CytoscapeGraph? _graph;
+
+    private List<PackageNode> _allPackageNodes = [];
+    private List<string> _allModules = [];
+    private List<CyNode> _nodes = [];
+    private List<CyEdge> _edges = [];
+    private string? _moduleFilter;
+    private string? _focusPackage;
+    private PackageNode? _selectedPackage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await SnapshotService.LoadAsync();
+        _allPackageNodes = [.. SnapshotService.GetPackageNodesSortedByTier()];
+        _allModules = _allPackageNodes.Select(p => p.Module).Distinct().Order().ToList();
+        RebuildGraph();
+    }
+
+    private void RebuildGraph()
+    {
+        var snapshot = SnapshotService.Snapshot;
+        if (snapshot is null) return;
+
+        var visiblePkgs = _allPackageNodes
+            .Where(p => _moduleFilter is null || p.Module == _moduleFilter)
+            .Select(p => p.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _nodes = _allPackageNodes
+            .Where(p => visiblePkgs.Contains(p.Id))
+            .Select(p => new CyNode
+            {
+                Id = p.Id,
+                Label = ShortLabel(p.Id),
+                Tier = p.Tier,
+                CiStatus = null,
+                HasLocalDev = false,
+            })
+            .ToList();
+
+        var visibleIds = _nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        _edges = snapshot.PackageEdges
+            .Where(e => visibleIds.Contains(e.From) && visibleIds.Contains(e.To))
+            .Select(e => new CyEdge { Source = e.From, Target = e.To, Kind = e.Kind })
+            .ToList();
+    }
+
+    private static HashSet<string> GetDependents(string packageId, IReadOnlyList<PackageEdge> edges)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { packageId };
+        bool changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var e in edges)
+                if (result.Contains(e.To) && result.Add(e.From))
+                    changed = true;
+        }
+        return result;
+    }
+
+    private static string ShortLabel(string packageId)
+        => packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)
+            ? packageId["BieberWorks.SDK.".Length..]
+            : packageId;
+
+    private void OnNodeClicked(string nodeId)
+    {
+        _selectedPackage = SnapshotService.GetPackageNode(nodeId);
+        StateHasChanged();
+    }
+
+    private async Task OnBackgroundTapped()
+    {
+        _selectedPackage = null;
+        _focusPackage = null;
+        if (_graph is not null)
+            await _graph.ClearHighlightAsync();
+        StateHasChanged();
+    }
+
+    private void CloseDetail()
+    {
+        _selectedPackage = null;
+        StateHasChanged();
+    }
+
+    private void OnModuleFilterChanged(string? value)
+    {
+        _moduleFilter = value;
+        RebuildGraph();
+    }
+
+    private async Task OnFocusPackageChanged(string? value)
+    {
+        _focusPackage = value;
+        if (string.IsNullOrEmpty(value))
+        {
+            if (_graph is not null)
+                await _graph.ClearHighlightAsync();
+        }
+        else if (_graph is not null)
+        {
+            var dependents = GetDependents(value, SnapshotService.Snapshot!.PackageEdges).ToList();
+            await _graph.HighlightAsync(dependents);
+        }
+    }
+
+    private async Task ResetLayout()
+    {
+        if (_graph is not null)
+            await _graph.ResetLayoutAsync();
+    }
+
+    private async Task ResetFilters()
+    {
+        _moduleFilter = null;
+        _focusPackage = null;
+        _selectedPackage = null;
+        RebuildGraph();
+        if (_graph is not null)
+            await _graph.ClearHighlightAsync();
+    }
+}

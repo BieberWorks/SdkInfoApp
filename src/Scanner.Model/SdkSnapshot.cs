@@ -25,6 +25,12 @@ public sealed record SdkSnapshot
 
     [JsonPropertyName("capabilityGroups")]
     public IReadOnlyList<CapabilityGroup> CapabilityGroups { get; init; } = [];
+
+    [JsonPropertyName("packageNodes")]
+    public IReadOnlyList<PackageNode> PackageNodes { get; init; } = [];
+
+    [JsonPropertyName("packageEdges")]
+    public IReadOnlyList<PackageEdge> PackageEdges { get; init; } = [];
 }
 
 public sealed record ModuleInfo
@@ -109,6 +115,33 @@ public sealed record CapabilityInfo
 
     [JsonPropertyName("providedBy")]
     public IReadOnlyList<string> ProvidedBy { get; init; } = [];
+}
+
+public sealed record PackageNode
+{
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = "";
+
+    [JsonPropertyName("module")]
+    public string Module { get; init; } = "";
+
+    [JsonPropertyName("tier")]
+    public int Tier { get; init; }
+}
+
+public sealed record PackageEdge
+{
+    [JsonPropertyName("from")]
+    public string From { get; init; } = "";
+
+    [JsonPropertyName("to")]
+    public string To { get; init; } = "";
+
+    [JsonPropertyName("versionRange")]
+    public string? VersionRange { get; init; }
+
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = "impl";
 }
 
 public sealed record CapabilityGroup

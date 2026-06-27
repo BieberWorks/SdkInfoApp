@@ -37,13 +37,16 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="4">
-            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters" Class="mr-2">Reset</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
+                       OnClick="ResetLayout">Reset Layout</MudButton>
         </MudItem>
     </MudGrid>
 </MudPaper>
 
 <div style="position:relative;">
     <CytoscapeGraph @ref="_graph" Nodes="@_nodes" Edges="@_edges" Height="650px"
+                    PersistKey="modules"
                     OnNodeClicked="OnNodeClicked" OnBackgroundTapped="OnBackgroundTapped" />
 
     @if (_selectedModule is not null)
@@ -204,6 +207,12 @@
             var dependents = GetDependents(value, SnapshotService.Snapshot!.Edges).ToList();
             await _graph.HighlightAsync(dependents);
         }
+    }
+
+    private async Task ResetLayout()
+    {
+        if (_graph is not null)
+            await _graph.ResetLayoutAsync();
     }
 
     private async Task ResetFilters()

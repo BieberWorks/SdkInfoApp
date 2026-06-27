@@ -52,4 +52,19 @@ public sealed class SnapshotService(HttpClient http)
 
     public IReadOnlyList<EdgeInfo> GetEdgesTo(string moduleId)
         => _snapshot?.Edges.Where(e => e.To == moduleId).ToList() ?? [];
+
+    public IReadOnlyList<PackageNode> GetPackageNodesSortedByTier()
+        => _snapshot?.PackageNodes
+            .OrderBy(p => p.Tier)
+            .ThenBy(p => p.Id)
+            .ToList() ?? [];
+
+    public PackageNode? GetPackageNode(string id)
+        => _snapshot?.PackageNodes.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    public IReadOnlyList<PackageEdge> GetPackageEdgesFrom(string packageId)
+        => _snapshot?.PackageEdges.Where(e => e.From == packageId).ToList() ?? [];
+
+    public IReadOnlyList<PackageEdge> GetPackageEdgesTo(string packageId)
+        => _snapshot?.PackageEdges.Where(e => e.To == packageId).ToList() ?? [];
 }

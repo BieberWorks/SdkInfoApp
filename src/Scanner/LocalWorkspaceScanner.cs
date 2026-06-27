@@ -69,7 +69,9 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
         var csprojFiles = Directory.GetFiles(dir, "*.csproj", SearchOption.AllDirectories);
         var packagePrefix = ReadPackagePrefix(dir);
         var ownPackages = new List<string>();
-        var rawEdges = new List<(string packageRef, string versionRange)>();
+
+        // Per-csproj: ownerPackageId → list of (refPackageId, version)
+        var perCsprojEdges = new List<(string ownerPkg, string refPkg, string version)>();
 
         foreach (var csproj in csprojFiles)
         {
@@ -79,28 +81,39 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
             if (!string.IsNullOrEmpty(packageId) && packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
                 ownPackages.Add(packageId);
 
+            if (string.IsNullOrEmpty(packageId)) continue;
+
             var refs = ReadPackageReferences(csproj);
             foreach (var (refId, version) in refs)
             {
                 if (refId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
-                    rawEdges.Add((refId, version));
+                    perCsprojEdges.Add((packageId, refId, version));
             }
         }
 
-        // Convert raw edges: packageRef → target repoId
+        // Repo-level edges (deduplicated by referenced package, cross-repo only)
+        var rawEdgesDistinct = perCsprojEdges
+            .Select(e => (e.refPkg, e.version))
+            .DistinctBy(e => e.refPkg);
+
         var edges = new List<ParsedEdge>();
-        foreach (var (pkgRef, version) in rawEdges.DistinctBy(e => e.packageRef))
+        foreach (var (pkgRef, version) in rawEdgesDistinct)
         {
             if (packageToRepo.TryGetValue(pkgRef, out var targetRepo) && targetRepo != repoId)
-            {
                 edges.Add(new ParsedEdge(pkgRef, targetRepo, version));
-            }
         }
+
+        // Package-level edges (deduplicated by ownerPkg+refPkg pair, cross-package)
+        var pkgEdges = perCsprojEdges
+            .Where(e => e.ownerPkg != e.refPkg)
+            .DistinctBy(e => $"{e.ownerPkg}→{e.refPkg}")
+            .Select(e => new RawPackageEdge(e.ownerPkg, e.refPkg, e.version))
+            .ToList();
 
         var manifest = TryReadManifest(dir, repoId);
 
         LogRepoScanned(repoId, ownPackages.Count, edges.Count);
-        return new RepoScanResult(repoId, ownPackages, edges, manifest);
+        return new RepoScanResult(repoId, ownPackages, edges, pkgEdges, manifest);
     }
 
     private static string ReadPackagePrefix(string repoDir)
@@ -194,6 +207,9 @@ internal sealed record RepoScanResult(
     string RepoId,
     IReadOnlyList<string> OwnPackages,
     IReadOnlyList<ParsedEdge> Edges,
+    IReadOnlyList<RawPackageEdge> PackageEdges,
     ModuleManifest? Manifest);
 
 internal sealed record ParsedEdge(string PackageRef, string TargetRepoId, string VersionRange);
+
+internal sealed record RawPackageEdge(string OwnerPackageId, string RefPackageId, string VersionRange);

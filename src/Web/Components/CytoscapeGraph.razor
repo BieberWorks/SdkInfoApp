@@ -7,6 +7,8 @@
     [Parameter] public IReadOnlyList<CyNode> Nodes { get; set; } = [];
     [Parameter] public IReadOnlyList<CyEdge> Edges { get; set; } = [];
     [Parameter] public string Height { get; set; } = "600px";
+    [Parameter] public string PersistKey { get; set; } = "default";
+    [Parameter] public string Layout { get; set; } = "dagre";
     [Parameter] public EventCallback<string> OnNodeClicked { get; set; }
     [Parameter] public EventCallback OnBackgroundTapped { get; set; }
 
@@ -22,7 +24,7 @@
         {
             _module = await JS.InvokeAsync<IJSObjectReference>("import", "./lib/graph-interop.js");
             _dotNetRef = DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("initGraph", _elementId, _dotNetRef);
+            await _module.InvokeVoidAsync("initGraph", _elementId, _dotNetRef, PersistKey, Layout);
             _initialized = true;
         }
 
@@ -47,6 +49,12 @@
     {
         if (_initialized && _module is not null)
             await _module.InvokeVoidAsync("resetHighlight", _elementId);
+    }
+
+    public async Task ResetLayoutAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("resetLayout", _elementId);
     }
 
     [JSInvokable]

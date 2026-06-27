@@ -93,6 +93,9 @@ internal sealed class SnapshotBuilder
         // Sort modules by tier then name for stable output
         modules.Sort((a, b) => a.Tier != b.Tier ? a.Tier.CompareTo(b.Tier) : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
 
+        // Build package-level graph
+        var (packageNodes, packageEdges) = BuildPackageGraph(repoInfos, tierMap);
+
         return new SdkSnapshot
         {
             SnapshotMode = snapshotMode,
@@ -101,7 +104,66 @@ internal sealed class SnapshotBuilder
             Edges = edges,
             Capabilities = capabilityMap.Values.OrderBy(c => c.Id).ToList(),
             CapabilityGroups = [],
+            PackageNodes = packageNodes,
+            PackageEdges = packageEdges,
         };
+    }
+
+    private static (List<PackageNode> nodes, List<PackageEdge> edges) BuildPackageGraph(
+        Dictionary<string, RepoScanResult> repoInfos,
+        Dictionary<string, int> tierMap)
+    {
+        // All known SDK package ids → their owning repo
+        var pkgToRepo = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (repoId, scan) in repoInfos)
+            foreach (var pkg in scan.OwnPackages)
+                pkgToRepo.TryAdd(pkg, repoId);
+
+        var nodes = new List<PackageNode>();
+        foreach (var (repoId, scan) in repoInfos)
+        {
+            foreach (var pkg in scan.OwnPackages)
+            {
+                nodes.Add(new PackageNode
+                {
+                    Id = pkg,
+                    Module = repoId,
+                    Tier = tierMap.GetValueOrDefault(repoId, 0),
+                });
+            }
+        }
+
+        nodes.Sort((a, b) => a.Tier != b.Tier
+            ? a.Tier.CompareTo(b.Tier)
+            : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+
+        // Collect all package-level edges; only include edges where BOTH endpoints are known SDK packages
+        var edgeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var edges = new List<PackageEdge>();
+
+        foreach (var (_, scan) in repoInfos)
+        {
+            foreach (var raw in scan.PackageEdges)
+            {
+                if (!pkgToRepo.ContainsKey(raw.RefPackageId)) continue;
+                var dedupeKey = $"{raw.OwnerPackageId}→{raw.RefPackageId}";
+                if (!edgeSet.Add(dedupeKey)) continue;
+
+                var kind = raw.RefPackageId.Contains(".Contracts", StringComparison.OrdinalIgnoreCase)
+                    ? "contracts"
+                    : "impl";
+
+                edges.Add(new PackageEdge
+                {
+                    From = raw.OwnerPackageId,
+                    To = raw.RefPackageId,
+                    VersionRange = raw.VersionRange,
+                    Kind = kind,
+                });
+            }
+        }
+
+        return (nodes, edges);
     }
 
     /// <summary>

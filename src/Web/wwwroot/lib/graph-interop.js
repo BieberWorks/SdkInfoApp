@@ -10,9 +10,39 @@ const TIER_COLORS = {
   5: '#795548',
 };
 
+// Map of elementId → { cy, persistKey, layoutName }
 const instances = new Map();
 
-export function initGraph(elementId, dotNetRef) {
+// ─── localStorage helpers ────────────────────────────────────────────────────
+
+function storageKey(persistKey) {
+  return `sdkinfo.graph.pos.${persistKey}`;
+}
+
+function loadPositions(persistKey) {
+  try {
+    const raw = localStorage.getItem(storageKey(persistKey));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePositions(persistKey, cy) {
+  try {
+    const pos = {};
+    cy.nodes().forEach(n => { pos[n.id()] = n.position(); });
+    localStorage.setItem(storageKey(persistKey), JSON.stringify(pos));
+  } catch { /* quota exceeded etc. — silently ignore */ }
+}
+
+function clearPositions(persistKey) {
+  try { localStorage.removeItem(storageKey(persistKey)); } catch { }
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
   const container = document.getElementById(elementId);
   if (!container) {
     console.warn(`[graph-interop] Element #${elementId} not found`);
@@ -28,13 +58,21 @@ export function initGraph(elementId, dotNetRef) {
     boxSelectionEnabled: false,
   });
 
+  // Persist node positions after dragging
+  cy.on('dragfree', 'node', () => savePositions(persistKey, cy));
+
   cy.on('tap', 'node', (evt) => {
     const nodeId = evt.target.id();
     dotNetRef.invokeMethodAsync('NodeClickedAsync', nodeId);
     cy.elements().removeClass('highlighted dimmed');
     evt.target.addClass('highlighted');
     evt.target.neighborhood().addClass('highlighted');
-    cy.elements().not(evt.target).not(evt.target.neighborhood()).addClass('dimmed');
+    // Also highlight edges between highlighted nodes
+    cy.edges().forEach(e => {
+      if (e.source().hasClass('highlighted') && e.target().hasClass('highlighted'))
+        e.addClass('highlighted');
+    });
+    cy.elements().not('.highlighted').addClass('dimmed');
   });
 
   cy.on('tap', (evt) => {
@@ -44,12 +82,13 @@ export function initGraph(elementId, dotNetRef) {
     }
   });
 
-  instances.set(elementId, cy);
+  instances.set(elementId, { cy, persistKey, layoutName: layoutName || 'dagre' });
 }
 
 export function setData(elementId, nodes, edges) {
-  const cy = instances.get(elementId);
-  if (!cy) return;
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  const { cy, persistKey } = inst;
 
   const elements = [
     ...nodes.map(n => ({
@@ -74,28 +113,75 @@ export function setData(elementId, nodes, edges) {
   cy.elements().remove();
   cy.add(elements);
 
-  runLayout(cy);
+  const saved = loadPositions(persistKey);
+  const nodeIds = nodes.map(n => n.id);
+  const allCovered = saved !== null && nodeIds.every(id => saved[id] !== undefined);
+
+  if (allCovered) {
+    cy.nodes().forEach(n => {
+      const p = saved[n.id()];
+      if (p) n.position(p);
+    });
+    cy.layout({ name: 'preset' }).run();
+  } else {
+    const layout = buildLayout(cy, inst.layoutName);
+    layout.one('layoutstop', () => savePositions(persistKey, cy));
+    layout.run();
+  }
 }
 
 export function highlightNodes(elementId, ids) {
-  const cy = instances.get(elementId);
-  if (!cy) return;
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  const { cy } = inst;
   cy.elements().removeClass('highlighted dimmed');
   const idSet = new Set(ids);
   cy.nodes().forEach(n => {
     if (idSet.has(n.id())) n.addClass('highlighted');
     else n.addClass('dimmed');
   });
+  cy.edges().forEach(e => {
+    if (idSet.has(e.source().id()) && idSet.has(e.target().id()))
+      e.addClass('highlighted');
+    else
+      e.addClass('dimmed');
+  });
 }
 
 export function resetHighlight(elementId) {
-  const cy = instances.get(elementId);
-  if (!cy) return;
-  cy.elements().removeClass('highlighted dimmed');
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  inst.cy.elements().removeClass('highlighted dimmed');
 }
 
-function runLayout(cy) {
-  const layout = cy.layout({
+export function resetLayout(elementId) {
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  const { cy, persistKey, layoutName } = inst;
+  clearPositions(persistKey);
+  const layout = buildLayout(cy, layoutName);
+  layout.one('layoutstop', () => savePositions(persistKey, cy));
+  layout.run();
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+function buildLayout(cy, layoutName) {
+  if (layoutName === 'cose') {
+    return cy.layout({
+      name: 'cose',
+      animate: false,
+      nodeRepulsion: 8000,
+      idealEdgeLength: 80,
+      nodeOverlap: 20,
+      gravity: 0.3,
+      numIter: 1000,
+      padding: 30,
+      fit: true,
+    });
+  }
+  // default: dagre
+  return cy.layout({
     name: 'dagre',
     rankDir: 'TB',
     nodeSep: 60,
@@ -104,7 +190,6 @@ function runLayout(cy) {
     animate: true,
     animationDuration: 300,
   });
-  layout.run();
 }
 
 function buildStyle() {
