@@ -492,8 +492,8 @@ function buildLayout(cy, layoutName) {
         animationDuration: 300,
       });
     case 'grid-module': {
-      // Build rowOf: one row per group, sorted by (tier, groupName)
-      const groupMeta = new Map(); // group -> { tier, name }
+      // ── Row: one row per group, sorted by (tier, groupName) ──────────────
+      const groupMeta = new Map();
       cy.nodes().forEach(n => {
         const g = n.data('group') || '';
         if (!groupMeta.has(g)) groupMeta.set(g, { tier: n.data('tier') || 0, name: g });
@@ -504,16 +504,47 @@ function buildLayout(cy, layoutName) {
       const rowOf = {};
       sortedGroups.forEach((g, i) => { rowOf[g] = i; });
 
-      // Build colOf: nodes within each group sorted by label
-      const groupNodes = {};
+      // ── Col: role-based, most-specific suffix first ────────────────────────
+      const roleOf = (label) => {
+        if (label.endsWith('UI.Blazor.MudBlazor')) return 'UI.Blazor.MudBlazor';
+        if (label.endsWith('UI.Blazor'))           return 'UI.Blazor';
+        if (label.endsWith('UI.Contracts'))        return 'UI.Contracts';
+        if (label.endsWith('Presentation'))        return 'Presentation';
+        if (label.endsWith('Contracts'))           return 'Contracts';
+        if (label.endsWith('Client'))              return 'Client';
+        if (label.endsWith('Management'))          return 'Management';
+        if (label.endsWith('Aws'))                 return 'Aws';
+        if (label.endsWith('Azure'))               return 'Azure';
+        if (label.endsWith('SharedKernel'))        return 'SharedKernel';
+        if (label.endsWith('.Postgres'))           return 'Postgres';
+        if (label.endsWith('.Web'))                return 'Web';
+        return 'impl';
+      };
+      const COL_ORDER = ['SharedKernel', 'impl', 'Postgres', 'Web', 'Contracts', 'Client', 'Management', 'Aws', 'Azure', 'Presentation', 'UI.Contracts', 'UI.Blazor', 'UI.Blazor.MudBlazor'];
+      const baseColOf = (label) => { const i = COL_ORDER.indexOf(roleOf(label)); return i < 0 ? COL_ORDER.length : i; };
+
+      // ── Collision guard: per-row track used cols, shift duplicates ────────
+      const usedCols = {}; // rowIndex -> Set<col>
+      sortedGroups.forEach((_, i) => { usedCols[i] = new Set(); });
+      // Assign cols deterministically: sort nodes per row by baseCol then label
+      const nodeColAssignment = {}; // nodeId -> col
+      const byRow = {};
       cy.nodes().forEach(n => {
-        const g = n.data('group') || '';
-        (groupNodes[g] = groupNodes[g] || []).push(n);
+        const r = rowOf[n.data('group')] ?? 0;
+        (byRow[r] = byRow[r] || []).push(n);
       });
-      const colOf = {};
-      Object.values(groupNodes).forEach(nodes => {
-        nodes.sort((a, b) => String(a.data('label')).localeCompare(String(b.data('label'))));
-        nodes.forEach((n, i) => { colOf[n.id()] = i; });
+      Object.entries(byRow).forEach(([rowStr, nodes]) => {
+        const row = parseInt(rowStr, 10);
+        nodes.sort((a, b) => {
+          const ca = baseColOf(a.data('label')), cb = baseColOf(b.data('label'));
+          return ca !== cb ? ca - cb : String(a.data('label')).localeCompare(String(b.data('label')));
+        });
+        nodes.forEach(n => {
+          let col = baseColOf(n.data('label'));
+          while (usedCols[row].has(col)) col++;
+          usedCols[row].add(col);
+          nodeColAssignment[n.id()] = col;
+        });
       });
 
       return cy.layout({
@@ -521,7 +552,8 @@ function buildLayout(cy, layoutName) {
         fit: true,
         padding: 20,
         avoidOverlap: true,
-        position: (node) => ({ row: rowOf[node.data('group')] ?? 0, col: colOf[node.id()] ?? 0 }),
+        rows: sortedGroups.length,
+        position: (node) => ({ row: rowOf[node.data('group')] ?? 0, col: nodeColAssignment[node.id()] ?? 0 }),
       });
     }
     default: // 'dagre'
