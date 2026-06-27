@@ -6,7 +6,7 @@
 <PageTitle>Capability Planner</PageTitle>
 
 <MudText Typo="Typo.h4" Class="mb-2">Capability Planner</MudText>
-<MudText Typo="Typo.body2" Class="mb-4">
+<MudText Typo="Typo.body2" Class="mb-3">
     Select the capabilities your application needs. The planner computes the exact set of SDK modules
     required — including transitive dependencies — and generates a ready-to-paste
     <code>PackageReference</code> snippet.
@@ -26,7 +26,7 @@
     return;
 }
 
-@* ── Toolbar ─────────────────────────────────────────────────────────────────── *@
+@* ── Toolbar — full width ─────────────────────────────────────────────────────── *@
 <MudPaper Class="pa-3 mb-3" Elevation="1">
     <MudGrid Spacing="2">
         <MudItem xs="12" sm="4" md="3">
@@ -61,109 +61,127 @@
     </MudGrid>
 </MudPaper>
 
-@* ── Capability Checkboxes ────────────────────────────────────────────────────── *@
-<MudGrid Spacing="3" Class="mb-4">
-    @foreach (var group in _visibleGroups)
-    {
-        <MudItem xs="12" sm="6" md="4">
-            <MudText Typo="Typo.subtitle1" Class="mb-1 font-weight-bold">@group.Label</MudText>
-            @foreach (var capId in group.Members)
+@* ── Two-column body ──────────────────────────────────────────────────────────── *@
+<MudGrid Spacing="3">
+
+    @* Left — Capability checkboxes *@
+    <MudItem xs="12" md="7">
+        <MudGrid Spacing="3">
+            @foreach (var group in _visibleGroups)
             {
-                var cap = _capById.GetValueOrDefault(capId);
-                if (cap is null) continue;
-                if (!MatchesSearch(cap)) continue;
+                <MudItem xs="12" sm="6">
+                    <MudText Typo="Typo.subtitle1" Class="mb-1" Style="font-weight:600;">
+                        @group.Label
+                    </MudText>
+                    @foreach (var capId in group.Members)
+                    {
+                        var cap = _capById.GetValueOrDefault(capId);
+                        if (cap is null) continue;
+                        if (!MatchesSearch(cap)) continue;
 
-                var isChecked = _selected.Contains(capId);
-                <div class="d-flex align-center" style="margin-bottom:2px;">
-                    <MudCheckBox T="bool" Value="@isChecked"
-                                 ValueChanged="@((v) => OnCapabilityToggled(capId, v))"
-                                 Size="Size.Small" Color="Color.Primary" />
-                    <MudTooltip Text="@(cap.Description ?? cap.Label)" Placement="Placement.Right">
-                        <MudText Typo="Typo.body2" Style="cursor:default;">@cap.Label</MudText>
-                    </MudTooltip>
-                </div>
-            }
-        </MudItem>
-    }
-</MudGrid>
-
-@* ── Results ──────────────────────────────────────────────────────────────────── *@
-@if (_result is not null)
-{
-    <MudDivider Class="my-4" />
-
-    <MudText Typo="Typo.h5" Class="mb-2">
-        Required Modules (@_result.AllModules.Count)
-    </MudText>
-
-    <MudGrid Spacing="3">
-        <MudItem xs="12" md="5">
-            <MudList T="ModuleInfo" Dense="true">
-                @foreach (var m in _result.AllModules)
-                {
-                    var isDirect = _result.DirectModuleIds.Contains(m.Id);
-                    <MudListItem T="ModuleInfo">
-                        <div class="d-flex align-center gap-2 flex-wrap">
-                            <MudChip T="string" Size="Size.Small"
-                                     Style="@TierChipStyle(m.Tier)"
-                                     Class="mr-1">
-                                Tier @m.Tier
-                            </MudChip>
-                            <MudText Typo="Typo.body2" Style="font-family:monospace;">@m.Id</MudText>
-                            @if (!string.IsNullOrEmpty(m.LatestGhVersion))
-                            {
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">
-                                    v@(m.LatestGhVersion)
-                                </MudText>
-                            }
-                            @if (isDirect)
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Success"
-                                         Icon="@Icons.Material.Filled.CheckCircle">
-                                    provider
-                                </MudChip>
-                            }
-                            else
-                            {
-                                <MudChip T="string" Size="Size.Small" Color="Color.Default"
-                                         Icon="@Icons.Material.Filled.Link">
-                                    dependency
-                                </MudChip>
-                            }
+                        var isChecked = _selected.Contains(capId);
+                        <div class="d-flex align-center" style="margin-bottom:2px;">
+                            <MudCheckBox T="bool" Value="@isChecked"
+                                         ValueChanged="@((v) => OnCapabilityToggled(capId, v))"
+                                         Size="Size.Small" Color="Color.Primary" />
+                            <MudTooltip Text="@(cap.Description ?? cap.Label)" Placement="Placement.Right">
+                                <MudText Typo="Typo.body2" Style="cursor:default;">@cap.Label</MudText>
+                            </MudTooltip>
                         </div>
-                    </MudListItem>
-                }
-            </MudList>
+                    }
+                </MudItem>
+            }
+        </MudGrid>
+    </MudItem>
 
-            @* ── Snippet Buttons ─────────────────────────────────────────────── *@
-            <div class="d-flex gap-2 mt-3 flex-wrap">
-                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.ContentCopy"
-                           OnClick="CopyPackageReferences">
-                    Copy PackageReferences
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.ContentCopy"
-                           OnClick="CopyNugetConfig">
-                    Copy nuget.config line
-                </MudButton>
-            </div>
+    @* Right — Result panel (sticky on desktop) *@
+    <MudItem xs="12" md="5">
+        <div @ref="_resultRef" id="planner-result" style="position:sticky; top:16px;">
+            @if (_result is null)
+            {
+                <MudPaper Class="pa-4" Elevation="1"
+                          Style="min-height:200px; display:flex; align-items:center; justify-content:center;">
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center">
+                        Select capabilities and click <b>Plan</b> to see the required modules.
+                    </MudText>
+                </MudPaper>
+            }
+            else
+            {
+                <MudPaper Class="pa-3" Elevation="2">
+                    <MudText Typo="Typo.h6" Class="mb-2">
+                        Required Modules (@_result.AllModules.Count)
+                    </MudText>
 
-            @* ── Snippet Preview ─────────────────────────────────────────────── *@
-            <MudPaper Class="pa-3 mt-3" Elevation="0"
-                      Style="background:var(--mud-palette-background-grey); overflow:auto; max-height:300px;">
-                <pre style="font-size:0.78rem; white-space:pre-wrap; margin:0;">@_result.Snippet</pre>
-            </MudPaper>
-        </MudItem>
+                    @* Module list *@
+                    <MudList T="ModuleInfo" Dense="true" Class="mb-2">
+                        @foreach (var m in _result.AllModules)
+                        {
+                            var isDirect = _result.DirectModuleIds.Contains(m.Id);
+                            <MudListItem T="ModuleInfo" Style="padding:2px 0;">
+                                <div class="d-flex align-center gap-1 flex-wrap">
+                                    <MudChip T="string" Size="Size.Small"
+                                             Style="@TierChipStyle(m.Tier)">
+                                        T@(m.Tier)
+                                    </MudChip>
+                                    <MudText Typo="Typo.body2"
+                                             Style="font-family:monospace; font-size:0.8rem;">
+                                        @m.Id
+                                    </MudText>
+                                    @if (!string.IsNullOrEmpty(m.LatestGhVersion))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                            v@(m.LatestGhVersion)
+                                        </MudText>
+                                    }
+                                    @if (isDirect)
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle"
+                                                 Size="Size.Small" Color="Color.Success"
+                                                 Title="direct provider" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.Link"
+                                                 Size="Size.Small" Color="Color.Default"
+                                                 Title="transitive dependency" />
+                                    }
+                                </div>
+                            </MudListItem>
+                        }
+                    </MudList>
 
-        <MudItem xs="12" md="7">
-            <MudText Typo="Typo.subtitle2" Class="mb-1">Dependency Graph</MudText>
-            <CytoscapeGraph @ref="_miniGraph"
-                            Nodes="@_result.GraphNodes" Edges="@_result.GraphEdges"
-                            Height="420px" PersistKey="planner" Layout="dagre" />
-        </MudItem>
-    </MudGrid>
-}
+                    @* Copy buttons *@
+                    <div class="d-flex gap-2 mb-2 flex-wrap">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.ContentCopy"
+                                   OnClick="CopyPackageReferences">
+                            PackageReferences
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.ContentCopy"
+                                   OnClick="CopyNugetConfig">
+                            nuget.config
+                        </MudButton>
+                    </div>
+
+                    @* Snippet preview *@
+                    <MudPaper Elevation="0" Class="pa-2 mb-3"
+                              Style="background:var(--mud-palette-background-grey); overflow:auto; max-height:240px;">
+                        <pre style="font-size:0.72rem; white-space:pre-wrap; margin:0;">@_result.Snippet</pre>
+                    </MudPaper>
+
+                    @* Mini dependency graph *@
+                    <MudText Typo="Typo.subtitle2" Class="mb-1">Dependency Graph</MudText>
+                    <CytoscapeGraph @ref="_miniGraph"
+                                    Nodes="@_result.GraphNodes" Edges="@_result.GraphEdges"
+                                    Height="320px" PersistKey="planner" Layout="dagre" />
+                </MudPaper>
+            }
+        </div>
+    </MudItem>
+
+</MudGrid>
 
 @code {
     // ── state ──────────────────────────────────────────────────────────────────
@@ -175,6 +193,7 @@
 
     private PlanResult? _result;
     private CytoscapeGraph? _miniGraph;
+    private ElementReference _resultRef;
 
     // ── lifecycle ──────────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
@@ -213,15 +232,9 @@
         _result = null;
     }
 
-    private void OnCategoryFilterChanged(string? value)
-    {
-        _categoryFilter = value;
-    }
+    private void OnCategoryFilterChanged(string? value) => _categoryFilter = value;
 
-    private void OnSearchChanged(string value)
-    {
-        _search = value;
-    }
+    private void OnSearchChanged(string value) => _search = value;
 
     private void ClearAll()
     {
@@ -246,7 +259,6 @@
             .ThenBy(m => m.Id)
             .ToList();
 
-        // Build graph nodes/edges for mini-graph
         var nodeSet = allIds;
         var graphNodes = allModules.Select(m => new CyNode
         {
@@ -268,8 +280,16 @@
 
         StateHasChanged();
 
-        // Highlight direct providers in mini-graph after render
+        // Scroll result panel into view (helps on mobile where sticky doesn't help)
         await Task.Yield();
+        try
+        {
+            await JS.InvokeVoidAsync("eval",
+                "document.getElementById('planner-result')?.scrollIntoView({behavior:'smooth',block:'nearest'})");
+        }
+        catch { /* non-critical */ }
+
+        // Highlight direct providers in mini-graph
         if (_miniGraph is not null && directIds.Count > 0)
             await _miniGraph.HighlightAsync(directIds.ToList());
     }
@@ -314,7 +334,7 @@
             4 => "#f44336",
             _ => "#795548",
         };
-        return $"background-color:{bg};color:#fff;";
+        return $"background-color:{bg};color:#fff;min-width:36px;";
     }
 
     // ── nested types ───────────────────────────────────────────────────────────
