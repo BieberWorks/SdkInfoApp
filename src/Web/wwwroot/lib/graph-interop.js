@@ -86,7 +86,8 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
     layout: { name: 'preset' },
     userZoomingEnabled: true,
     userPanningEnabled: true,
-    boxSelectionEnabled: false,
+    boxSelectionEnabled: true,
+    selectionType: 'additive',
   });
 
   // Read persisted arrangement choice
@@ -135,10 +136,11 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
   };
   document.addEventListener('fullscreenchange', onFullscreenChange);
 
-  // dragfree: update livePositions in-memory only — no localStorage write
-  cy.on('dragfree', 'node', (evt) => {
+  // dragfree: capture ALL node positions so a group-move is fully recorded
+  cy.on('dragfree', 'node', () => {
     const i = instances.get(elementId);
-    if (i) i.livePositions.set(evt.target.id(), { ...evt.target.position() });
+    if (!i) return;
+    cy.nodes().forEach(n => i.livePositions.set(n.id(), { ...n.position() }));
   });
 
   cy.on('tap', 'node', (evt) => {
@@ -616,6 +618,10 @@ function buildStyle() {
     {
       selector: 'edge[kind = "contracts"]',
       style: { 'line-color': '#42a5f5', 'target-arrow-color': '#42a5f5', 'line-style': 'dashed' },
+    },
+    {
+      selector: 'node:selected',
+      style: { 'border-width': 4, 'border-color': '#ffeb3b', 'border-opacity': 1, 'overlay-opacity': 0.1 },
     },
     {
       selector: '.highlighted',
