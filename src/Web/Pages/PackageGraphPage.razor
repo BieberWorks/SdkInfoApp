@@ -1,6 +1,5 @@
 @page "/packages"
 @inject SnapshotService SnapshotService
-@inject NavigationManager Nav
 
 <PageTitle>Package Graph</PageTitle>
 
@@ -20,18 +19,25 @@
     return;
 }
 
-<MudPaper Class="pa-2 mb-3" Elevation="1">
+<MudPaper Class="pa-3 mb-3" Elevation="1">
+    <MudText Typo="Typo.subtitle2" Class="mb-1">Highlight by module</MudText>
+    <MudChipSet T="string" SelectionMode="SelectionMode.MultiSelection"
+                SelectedValues="_activeModules"
+                SelectedValuesChanged="OnActiveModulesChanged">
+        @foreach (var m in _moduleEntries)
+        {
+            <MudChip T="string" Value="@m.Name"
+                     Style="@($"background-color:{TierColor(m.Tier)};color:#fff;")"
+                     Size="Size.Small">
+                @m.Name
+            </MudChip>
+        }
+    </MudChipSet>
+
+    <MudDivider Class="my-2" />
+
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="4">
-            <MudSelect T="string?" Label="Filter by module" Value="_moduleFilter"
-                       ValueChanged="OnModuleFilterChanged" Clearable="true">
-                @foreach (var m in _allModules)
-                {
-                    <MudSelectItem T="string?" Value="@m">@m</MudSelectItem>
-                }
-            </MudSelect>
-        </MudItem>
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="6">
             <MudSelect T="string?" Label="Highlight dependents of" Value="_focusPackage"
                        ValueChanged="OnFocusPackageChanged" Clearable="true">
                 @foreach (var p in _allPackageNodes)
@@ -40,8 +46,8 @@
                 }
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="4">
-            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters" Class="mr-2">Reset</MudButton>
+        <MudItem xs="12" sm="6" Class="d-flex align-center gap-2">
+            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
                        OnClick="ResetLayout">Reset Layout</MudButton>
         </MudItem>
@@ -81,13 +87,15 @@
 </div>
 
 @code {
+    private record ModuleEntry(string Name, int Tier);
+
     private CytoscapeGraph? _graph;
 
     private List<PackageNode> _allPackageNodes = [];
-    private List<string> _allModules = [];
+    private List<ModuleEntry> _moduleEntries = [];
     private List<CyNode> _nodes = [];
     private List<CyEdge> _edges = [];
-    private string? _moduleFilter;
+    private IReadOnlyCollection<string> _activeModules = [];
     private string? _focusPackage;
     private PackageNode? _selectedPackage;
 
@@ -95,7 +103,14 @@
     {
         await SnapshotService.LoadAsync();
         _allPackageNodes = [.. SnapshotService.GetPackageNodesSortedByTier()];
-        _allModules = _allPackageNodes.Select(p => p.Module).Distinct().Order().ToList();
+
+        // Distinct modules sorted by their lowest tier then name
+        _moduleEntries = _allPackageNodes
+            .GroupBy(p => p.Module)
+            .Select(g => new ModuleEntry(g.Key, g.Min(p => p.Tier)))
+            .OrderBy(m => m.Tier).ThenBy(m => m.Name)
+            .ToList();
+
         RebuildGraph();
     }
 
@@ -104,13 +119,8 @@
         var snapshot = SnapshotService.Snapshot;
         if (snapshot is null) return;
 
-        var visiblePkgs = _allPackageNodes
-            .Where(p => _moduleFilter is null || p.Module == _moduleFilter)
-            .Select(p => p.Id)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+        // All 83 packages always visible — module chips only highlight, never filter
         _nodes = _allPackageNodes
-            .Where(p => visiblePkgs.Contains(p.Id))
             .Select(p => new CyNode
             {
                 Id = p.Id,
@@ -121,12 +131,51 @@
             })
             .ToList();
 
-        var visibleIds = _nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var allIds = _nodes.Select(n => n.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         _edges = snapshot.PackageEdges
-            .Where(e => visibleIds.Contains(e.From) && visibleIds.Contains(e.To))
+            .Where(e => allIds.Contains(e.From) && allIds.Contains(e.To))
             .Select(e => new CyEdge { Source = e.From, Target = e.To, Kind = e.Kind })
             .ToList();
+    }
+
+    private async Task OnActiveModulesChanged(IReadOnlyCollection<string> selected)
+    {
+        _activeModules = selected;
+        _focusPackage = null; // module-chips win over dependents-select; last action wins
+
+        if (_graph is null) return;
+
+        if (selected.Count == 0)
+        {
+            await _graph.ClearHighlightAsync();
+            return;
+        }
+
+        var selectedSet = selected.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ids = _allPackageNodes
+            .Where(p => selectedSet.Contains(p.Module))
+            .Select(p => p.Id)
+            .ToList();
+
+        await _graph.HighlightAsync(ids);
+    }
+
+    private async Task OnFocusPackageChanged(string? value)
+    {
+        _focusPackage = value;
+        _activeModules = []; // dependents-select wins over module-chips; last action wins
+
+        if (_graph is null) return;
+
+        if (string.IsNullOrEmpty(value))
+        {
+            await _graph.ClearHighlightAsync();
+            return;
+        }
+
+        var dependents = GetDependents(value, SnapshotService.Snapshot!.PackageEdges).ToList();
+        await _graph.HighlightAsync(dependents);
     }
 
     private static HashSet<string> GetDependents(string packageId, IReadOnlyList<PackageEdge> edges)
@@ -148,6 +197,16 @@
             ? packageId["BieberWorks.SDK.".Length..]
             : packageId;
 
+    private static string TierColor(int tier) => tier switch
+    {
+        0 => "#4caf50",
+        1 => "#2196f3",
+        2 => "#9c27b0",
+        3 => "#ff9800",
+        4 => "#f44336",
+        _ => "#795548",
+    };
+
     private void OnNodeClicked(string nodeId)
     {
         _selectedPackage = SnapshotService.GetPackageNode(nodeId);
@@ -158,6 +217,7 @@
     {
         _selectedPackage = null;
         _focusPackage = null;
+        _activeModules = [];
         if (_graph is not null)
             await _graph.ClearHighlightAsync();
         StateHasChanged();
@@ -169,40 +229,18 @@
         StateHasChanged();
     }
 
-    private void OnModuleFilterChanged(string? value)
+    private async Task ResetFilters()
     {
-        _moduleFilter = value;
-        RebuildGraph();
-    }
-
-    private async Task OnFocusPackageChanged(string? value)
-    {
-        _focusPackage = value;
-        if (string.IsNullOrEmpty(value))
-        {
-            if (_graph is not null)
-                await _graph.ClearHighlightAsync();
-        }
-        else if (_graph is not null)
-        {
-            var dependents = GetDependents(value, SnapshotService.Snapshot!.PackageEdges).ToList();
-            await _graph.HighlightAsync(dependents);
-        }
+        _activeModules = [];
+        _focusPackage = null;
+        _selectedPackage = null;
+        if (_graph is not null)
+            await _graph.ClearHighlightAsync();
     }
 
     private async Task ResetLayout()
     {
         if (_graph is not null)
             await _graph.ResetLayoutAsync();
-    }
-
-    private async Task ResetFilters()
-    {
-        _moduleFilter = null;
-        _focusPackage = null;
-        _selectedPackage = null;
-        RebuildGraph();
-        if (_graph is not null)
-            await _graph.ClearHighlightAsync();
     }
 }
