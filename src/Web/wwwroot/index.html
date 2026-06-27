@@ -7,11 +7,42 @@
     <base href="/" />
     <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <style>
+        /* Pre-boot splash. Defaults to dark; honors the persisted light/dark preference. */
+        html, body { margin: 0; background: #1a1a27; }
+        html.preload-light, html.preload-light body { background: #ffffff; }
+
+        .preload-splash {
+            display: flex; flex-direction: column; gap: 18px;
+            justify-content: center; align-items: center; height: 100vh;
+            font-family: 'Roboto', sans-serif; color: #b9b9c9;
+        }
+        html.preload-light .preload-splash { color: #5a5a66; }
+
+        .preload-spinner {
+            width: 42px; height: 42px; border-radius: 50%;
+            border: 4px solid rgba(124, 110, 240, 0.25);
+            border-top-color: #7c6ef0;
+            animation: preload-spin 0.9s linear infinite;
+        }
+        @keyframes preload-spin { to { transform: rotate(360deg); } }
+    </style>
+    <script>
+        // Apply the saved theme before first paint to avoid a flash.
+        (function () {
+            try {
+                if (localStorage.getItem('sdkinfo.darkmode') === 'false') {
+                    document.documentElement.classList.add('preload-light');
+                }
+            } catch (e) { /* localStorage unavailable — keep dark default */ }
+        })();
+    </script>
 </head>
 <body>
     <div id="app">
-        <div style="display:flex;justify-content:center;align-items:center;height:100vh;">
-            <p>Loading BieberWorks SDK Info...</p>
+        <div class="preload-splash">
+            <div class="preload-spinner"></div>
+            <p>Loading BieberWorks SDK Info…</p>
         </div>
     </div>
 
