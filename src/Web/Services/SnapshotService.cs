@@ -67,4 +67,39 @@ public sealed class SnapshotService(HttpClient http)
 
     public IReadOnlyList<PackageEdge> GetPackageEdgesTo(string packageId)
         => _snapshot?.PackageEdges.Where(e => e.To == packageId).ToList() ?? [];
+
+    /// <summary>
+    /// Returns the direct provider modules for the given capability IDs.
+    /// </summary>
+    public HashSet<string> DirectModulesForCapabilities(IEnumerable<string> capabilityIds)
+    {
+        if (_snapshot is null) return [];
+        var ids = capabilityIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return _snapshot.Capabilities
+            .Where(c => ids.Contains(c.Id))
+            .SelectMany(c => c.ProvidedBy)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// BFS over snapshot edges (From depends-on To) to compute the full upstream transitive closure.
+    /// Returns all module IDs the consumer must install, including seeds.
+    /// </summary>
+    public HashSet<string> TransitiveUpstreamClosure(IEnumerable<string> seeds)
+    {
+        if (_snapshot is null) return [];
+        var visited = seeds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<string>(visited);
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            foreach (var edge in _snapshot.Edges.Where(e =>
+                string.Equals(e.From, current, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (visited.Add(edge.To))
+                    queue.Enqueue(edge.To);
+            }
+        }
+        return visited;
+    }
 }
