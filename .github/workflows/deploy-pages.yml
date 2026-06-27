@@ -31,6 +31,16 @@ jobs:
             -p:GHPages=true \
             --output publish/
 
+      - name: Set base href for project-pages subpath
+        # The app is served from https://<org>.github.io/SdkInfoApp/ (a sub-path), so the
+        # generated index.html <base href="/"> must become "/SdkInfoApp/" or every relative
+        # asset (_framework, _content, lib, snapshots) 404s and the app never boots.
+        # .nojekyll prevents any processing of the _framework/_content underscore folders.
+        run: |
+          sed -i 's|<base href="/" />|<base href="/SdkInfoApp/" />|' publish/wwwroot/index.html
+          touch publish/wwwroot/.nojekyll
+          echo "base href is now:"; grep -i '<base' publish/wwwroot/index.html
+
       - name: Create snapshots directory
         run: mkdir -p publish/wwwroot/snapshots
 
