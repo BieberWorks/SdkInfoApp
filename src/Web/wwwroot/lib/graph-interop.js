@@ -10,8 +10,19 @@ const TIER_COLORS = {
   5: '#795548',
 };
 
-// Map of elementId → { cy, persistKey, layoutName }
+// Map of elementId → { cy, persistKey, layoutName, clickDirection, clickTransitive, lastTappedId }
 const instances = new Map();
+
+const DIM_OPACITY_KEY = 'sdkinfo.graph.dimOpacity';
+
+function loadDimOpacity() {
+  try {
+    const v = parseFloat(localStorage.getItem(DIM_OPACITY_KEY));
+    return isNaN(v) ? 0.25 : v;
+  } catch { return 0.25; }
+}
+
+let dimOpacity = loadDimOpacity();
 
 // ─── localStorage helpers ────────────────────────────────────────────────────
 
@@ -62,27 +73,31 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
   cy.on('dragfree', 'node', () => savePositions(persistKey, cy));
 
   cy.on('tap', 'node', (evt) => {
-    const nodeId = evt.target.id();
-    dotNetRef.invokeMethodAsync('NodeClickedAsync', nodeId);
-    cy.elements().removeClass('highlighted dimmed');
-    evt.target.addClass('highlighted');
-    evt.target.neighborhood().addClass('highlighted');
-    // Also highlight edges between highlighted nodes
-    cy.edges().forEach(e => {
-      if (e.source().hasClass('highlighted') && e.target().hasClass('highlighted'))
-        e.addClass('highlighted');
-    });
-    cy.elements().not('.highlighted').addClass('dimmed');
+    const inst2 = instances.get(elementId);
+    if (!inst2) return;
+    const t = evt.target;
+    inst2.lastTappedId = t.id();
+    dotNetRef.invokeMethodAsync('NodeClickedAsync', t.id());
+    applyDirectedHighlight(cy, t, inst2.clickDirection, inst2.clickTransitive);
   });
 
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
+      const inst2 = instances.get(elementId);
+      if (inst2) inst2.lastTappedId = null;
       cy.elements().removeClass('highlighted dimmed');
       dotNetRef.invokeMethodAsync('BackgroundTappedAsync');
     }
   });
 
-  instances.set(elementId, { cy, persistKey, layoutName: layoutName || 'dagre' });
+  instances.set(elementId, {
+    cy,
+    persistKey,
+    layoutName: layoutName || 'dagre',
+    clickDirection: 'both',
+    clickTransitive: false,
+    lastTappedId: null,
+  });
 }
 
 export function setData(elementId, nodes, edges) {
@@ -164,7 +179,50 @@ export function resetLayout(elementId) {
   layout.run();
 }
 
+export function setClickMode(elementId, direction, transitive) {
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  inst.clickDirection = direction;
+  inst.clickTransitive = transitive;
+  // Re-apply highlight if a node was previously tapped
+  if (inst.lastTappedId) {
+    const node = inst.cy.getElementById(inst.lastTappedId);
+    if (node && node.length > 0) {
+      applyDirectedHighlight(inst.cy, node, direction, transitive);
+    }
+  }
+}
+
+export function setDimOpacity(elementId, value) {
+  dimOpacity = value;
+  try { localStorage.setItem(DIM_OPACITY_KEY, String(value)); } catch { }
+  // Apply live to the current instance
+  const inst = instances.get(elementId);
+  if (inst) {
+    inst.cy.style().selector('.dimmed').style('opacity', value).update();
+  }
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
+
+function applyDirectedHighlight(cy, node, direction, transitive) {
+  cy.elements().removeClass('highlighted dimmed');
+  let hl;
+  if (direction === 'depends') {
+    // Nodes that this node depends on (outgoing direction: successors)
+    hl = transitive ? node.union(node.successors()) : node.union(node.outgoers());
+  } else if (direction === 'used') {
+    // Nodes that use/depend on this node (incoming direction: predecessors)
+    hl = transitive ? node.union(node.predecessors()) : node.union(node.incomers());
+  } else {
+    // both: immediate neighborhood or full transitive in both directions
+    hl = transitive
+      ? node.union(node.successors()).union(node.predecessors())
+      : node.closedNeighborhood();
+  }
+  hl.addClass('highlighted');
+  cy.elements().not('.highlighted').addClass('dimmed');
+}
 
 function buildLayout(cy, layoutName) {
   if (layoutName === 'cose') {
@@ -246,7 +304,7 @@ function buildStyle() {
     },
     {
       selector: '.dimmed',
-      style: { 'opacity': 0.25 },
+      style: { 'opacity': dimOpacity },
     },
   ];
 }

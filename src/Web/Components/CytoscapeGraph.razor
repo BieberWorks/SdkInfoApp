@@ -57,6 +57,18 @@
             await _module.InvokeVoidAsync("resetLayout", _elementId);
     }
 
+    public async Task SetClickModeAsync(string direction, bool transitive)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("setClickMode", _elementId, direction, transitive);
+    }
+
+    public async Task SetDimOpacityAsync(double value)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("setDimOpacity", _elementId, value);
+    }
+
     [JSInvokable]
     public Task NodeClickedAsync(string nodeId) => OnNodeClicked.InvokeAsync(nodeId);
 

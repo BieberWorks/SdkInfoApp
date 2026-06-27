@@ -1,6 +1,7 @@
 @page "/graph"
 @inject SnapshotService SnapshotService
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <PageTitle>Module Graph</PageTitle>
 
@@ -20,7 +21,7 @@
 
 <MudPaper Class="pa-2 mb-3" Elevation="1">
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="3">
             <MudSelect T="int?" Label="Filter by Tier" Value="_tierFilter" ValueChanged="OnTierFilterChanged" Clearable="true">
                 @foreach (var tier in _availableTiers)
                 {
@@ -28,7 +29,7 @@
                 }
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="4">
+        <MudItem xs="12" sm="3">
             <MudSelect T="string?" Label="Highlight dependents of" Value="_focusModule" ValueChanged="OnFocusModuleChanged" Clearable="true">
                 @foreach (var m in _allModules)
                 {
@@ -36,10 +37,33 @@
                 }
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="4">
-            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters" Class="mr-2">Reset</MudButton>
+        <MudItem xs="12" sm="3">
+            <MudText Typo="Typo.caption" Class="mb-1">Click direction</MudText>
+            <div class="d-flex flex-wrap align-center gap-2">
+                <MudToggleGroup T="string" Value="_clickDirection" ValueChanged="OnClickDirectionChanged"
+                                SelectionMode="SelectionMode.SingleSelection"
+                                Size="Size.Small" Outlined="true" Dense="true">
+                    <MudToggleItem Value="@("both")">Both</MudToggleItem>
+                    <MudToggleItem Value="@("depends")">Depends on</MudToggleItem>
+                    <MudToggleItem Value="@("used")">Used by</MudToggleItem>
+                </MudToggleGroup>
+                <MudSwitch T="bool" Value="_clickTransitive" ValueChanged="OnClickTransitiveChanged"
+                           Label="Transitive" Size="Size.Small" Color="Color.Primary" />
+            </div>
+        </MudItem>
+        <MudItem xs="12" sm="3" Class="d-flex align-center gap-2">
+            <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
                        OnClick="ResetLayout">Reset Layout</MudButton>
+        </MudItem>
+    </MudGrid>
+    <MudGrid Spacing="2" Class="mt-1">
+        <MudItem xs="12" sm="5">
+            <MudSlider T="double" Min="0.0" Max="0.5" Step="0.05"
+                       Value="_dimOpacity" ValueChanged="OnDimOpacityChanged"
+                       Color="Color.Secondary">
+                Dimmed opacity: @(_dimOpacity.ToString("F2"))
+            </MudSlider>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -94,6 +118,8 @@
 </div>
 
 @code {
+    private const string DimOpacityKey = "sdkinfo.graph.dimOpacity";
+
     private CytoscapeGraph? _graph;
 
     private List<ModuleInfo> _allModules = [];
@@ -103,12 +129,25 @@
     private int? _tierFilter;
     private string? _focusModule;
     private ModuleInfo? _selectedModule;
+    private string _clickDirection = "both";
+    private bool _clickTransitive;
+    private double _dimOpacity = 0.25;
 
     protected override async Task OnInitializedAsync()
     {
         await SnapshotService.LoadAsync();
         _allModules = [.. SnapshotService.GetModulesSortedByTier()];
         _availableTiers = _allModules.Select(m => m.Tier).Distinct().Order().ToArray();
+
+        // Read persisted dim opacity
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
+            if (stored is not null && double.TryParse(stored, out var parsed))
+                _dimOpacity = parsed;
+        }
+        catch { /* JS not yet available — keep default */ }
+
         RebuildGraph();
     }
 
@@ -142,11 +181,6 @@
             .ToList();
     }
 
-    /// <summary>
-    /// Returns moduleId plus all modules that transitively depend ON it
-    /// (reverse transitive closure). EdgeInfo.From depends on EdgeInfo.To,
-    /// so dependents are nodes whose To eventually reaches moduleId.
-    /// </summary>
     private static HashSet<string> GetDependents(string moduleId, IReadOnlyList<EdgeInfo> edges)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { moduleId };
@@ -209,6 +243,27 @@
         }
     }
 
+    private async Task OnClickDirectionChanged(string value)
+    {
+        _clickDirection = value;
+        if (_graph is not null)
+            await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+    }
+
+    private async Task OnClickTransitiveChanged(bool value)
+    {
+        _clickTransitive = value;
+        if (_graph is not null)
+            await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+    }
+
+    private async Task OnDimOpacityChanged(double value)
+    {
+        _dimOpacity = value;
+        if (_graph is not null)
+            await _graph.SetDimOpacityAsync(value);
+    }
+
     private async Task ResetLayout()
     {
         if (_graph is not null)
@@ -220,8 +275,13 @@
         _tierFilter = null;
         _focusModule = null;
         _selectedModule = null;
+        _clickDirection = "both";
+        _clickTransitive = false;
         RebuildGraph();
         if (_graph is not null)
+        {
             await _graph.ClearHighlightAsync();
+            await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+        }
     }
 }

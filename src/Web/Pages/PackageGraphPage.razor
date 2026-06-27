@@ -1,5 +1,6 @@
 @page "/packages"
 @inject SnapshotService SnapshotService
+@inject IJSRuntime JS
 
 <PageTitle>Package Graph</PageTitle>
 
@@ -21,23 +22,31 @@
 
 <MudPaper Class="pa-3 mb-3" Elevation="1">
     <MudText Typo="Typo.subtitle2" Class="mb-1">Highlight by module</MudText>
-    <MudChipSet T="string" SelectionMode="SelectionMode.MultiSelection"
-                SelectedValues="_activeModules"
-                SelectedValuesChanged="OnActiveModulesChanged">
+    <div class="d-flex flex-wrap gap-1 mb-2">
         @foreach (var m in _moduleEntries)
         {
-            <MudChip T="string" Value="@m.Name"
-                     Style="@($"background-color:{TierColor(m.Tier)};color:#fff;")"
-                     Size="Size.Small">
+            var isActive = _activeModules.Contains(m.Name);
+            var bgColor = isActive ? TierColor(m.Tier) : "transparent";
+            var textColor = isActive ? "#fff" : TierColor(m.Tier);
+            var border = $"1.5px solid {TierColor(m.Tier)}";
+            var opacity = isActive ? "1" : "0.55";
+            <MudChip T="string"
+                     Style="@($"background-color:{bgColor};color:{textColor};border:{border};opacity:{opacity};cursor:pointer;")"
+                     Size="Size.Small"
+                     OnClick="@(() => ToggleModule(m.Name))">
+                @if (isActive)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="mr-1" />
+                }
                 @m.Name
             </MudChip>
         }
-    </MudChipSet>
+    </div>
 
     <MudDivider Class="my-2" />
 
     <MudGrid Spacing="2">
-        <MudItem xs="12" sm="6">
+        <MudItem xs="12" sm="4">
             <MudSelect T="string?" Label="Highlight dependents of" Value="_focusPackage"
                        ValueChanged="OnFocusPackageChanged" Clearable="true">
                 @foreach (var p in _allPackageNodes)
@@ -46,10 +55,33 @@
                 }
             </MudSelect>
         </MudItem>
-        <MudItem xs="12" sm="6" Class="d-flex align-center gap-2">
+        <MudItem xs="12" sm="4">
+            <MudText Typo="Typo.caption" Class="mb-1">Click direction</MudText>
+            <div class="d-flex flex-wrap align-center gap-2">
+                <MudToggleGroup T="string" Value="_clickDirection" ValueChanged="OnClickDirectionChanged"
+                                SelectionMode="SelectionMode.SingleSelection"
+                                Size="Size.Small" Outlined="true" Dense="true">
+                    <MudToggleItem Value="@("both")">Both</MudToggleItem>
+                    <MudToggleItem Value="@("depends")">Depends on</MudToggleItem>
+                    <MudToggleItem Value="@("used")">Used by</MudToggleItem>
+                </MudToggleGroup>
+                <MudSwitch T="bool" Value="_clickTransitive" ValueChanged="OnClickTransitiveChanged"
+                           Label="Transitive" Size="Size.Small" Color="Color.Primary" />
+            </div>
+        </MudItem>
+        <MudItem xs="12" sm="4" Class="d-flex align-center gap-2">
             <MudButton Variant="Variant.Outlined" OnClick="ResetFilters">Reset</MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.GridView"
                        OnClick="ResetLayout">Reset Layout</MudButton>
+        </MudItem>
+    </MudGrid>
+    <MudGrid Spacing="2" Class="mt-1">
+        <MudItem xs="12" sm="5">
+            <MudSlider T="double" Min="0.0" Max="0.5" Step="0.05"
+                       Value="_dimOpacity" ValueChanged="OnDimOpacityChanged"
+                       Color="Color.Secondary">
+                Dimmed opacity: @(_dimOpacity.ToString("F2"))
+            </MudSlider>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -87,6 +119,7 @@
 </div>
 
 @code {
+    private const string DimOpacityKey = "sdkinfo.graph.dimOpacity";
     private record ModuleEntry(string Name, int Tier);
 
     private CytoscapeGraph? _graph;
@@ -95,21 +128,32 @@
     private List<ModuleEntry> _moduleEntries = [];
     private List<CyNode> _nodes = [];
     private List<CyEdge> _edges = [];
-    private IReadOnlyCollection<string> _activeModules = [];
+    private HashSet<string> _activeModules = new(StringComparer.OrdinalIgnoreCase);
     private string? _focusPackage;
     private PackageNode? _selectedPackage;
+    private string _clickDirection = "both";
+    private bool _clickTransitive;
+    private double _dimOpacity = 0.25;
 
     protected override async Task OnInitializedAsync()
     {
         await SnapshotService.LoadAsync();
         _allPackageNodes = [.. SnapshotService.GetPackageNodesSortedByTier()];
 
-        // Distinct modules sorted by their lowest tier then name
         _moduleEntries = _allPackageNodes
             .GroupBy(p => p.Module)
             .Select(g => new ModuleEntry(g.Key, g.Min(p => p.Tier)))
             .OrderBy(m => m.Tier).ThenBy(m => m.Name)
             .ToList();
+
+        // Read persisted dim opacity
+        try
+        {
+            var stored = await JS.InvokeAsync<string?>("localStorage.getItem", DimOpacityKey);
+            if (stored is not null && double.TryParse(stored, out var parsed))
+                _dimOpacity = parsed;
+        }
+        catch { /* JS not yet available — keep default */ }
 
         RebuildGraph();
     }
@@ -119,7 +163,6 @@
         var snapshot = SnapshotService.Snapshot;
         if (snapshot is null) return;
 
-        // All 83 packages always visible — module chips only highlight, never filter
         _nodes = _allPackageNodes
             .Select(p => new CyNode
             {
@@ -139,22 +182,27 @@
             .ToList();
     }
 
-    private async Task OnActiveModulesChanged(IReadOnlyCollection<string> selected)
+    private async Task ToggleModule(string moduleName)
     {
-        _activeModules = selected;
-        _focusPackage = null; // module-chips win over dependents-select; last action wins
+        if (!_activeModules.Add(moduleName))
+            _activeModules.Remove(moduleName);
 
+        _focusPackage = null;
+        await ApplyModuleHighlight();
+    }
+
+    private async Task ApplyModuleHighlight()
+    {
         if (_graph is null) return;
 
-        if (selected.Count == 0)
+        if (_activeModules.Count == 0)
         {
             await _graph.ClearHighlightAsync();
             return;
         }
 
-        var selectedSet = selected.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var ids = _allPackageNodes
-            .Where(p => selectedSet.Contains(p.Module))
+            .Where(p => _activeModules.Contains(p.Module))
             .Select(p => p.Id)
             .ToList();
 
@@ -164,7 +212,7 @@
     private async Task OnFocusPackageChanged(string? value)
     {
         _focusPackage = value;
-        _activeModules = []; // dependents-select wins over module-chips; last action wins
+        _activeModules.Clear();
 
         if (_graph is null) return;
 
@@ -176,6 +224,27 @@
 
         var dependents = GetDependents(value, SnapshotService.Snapshot!.PackageEdges).ToList();
         await _graph.HighlightAsync(dependents);
+    }
+
+    private async Task OnClickDirectionChanged(string value)
+    {
+        _clickDirection = value;
+        if (_graph is not null)
+            await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+    }
+
+    private async Task OnClickTransitiveChanged(bool value)
+    {
+        _clickTransitive = value;
+        if (_graph is not null)
+            await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+    }
+
+    private async Task OnDimOpacityChanged(double value)
+    {
+        _dimOpacity = value;
+        if (_graph is not null)
+            await _graph.SetDimOpacityAsync(value);
     }
 
     private static HashSet<string> GetDependents(string packageId, IReadOnlyList<PackageEdge> edges)
@@ -217,7 +286,7 @@
     {
         _selectedPackage = null;
         _focusPackage = null;
-        _activeModules = [];
+        _activeModules.Clear();
         if (_graph is not null)
             await _graph.ClearHighlightAsync();
         StateHasChanged();
@@ -231,11 +300,16 @@
 
     private async Task ResetFilters()
     {
-        _activeModules = [];
+        _activeModules.Clear();
         _focusPackage = null;
         _selectedPackage = null;
+        _clickDirection = "both";
+        _clickTransitive = false;
         if (_graph is not null)
+        {
             await _graph.ClearHighlightAsync();
+            await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+        }
     }
 
     private async Task ResetLayout()
