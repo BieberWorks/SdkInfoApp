@@ -491,17 +491,39 @@ function buildLayout(cy, layoutName) {
         animate: true,
         animationDuration: 300,
       });
-    case 'grid-module':
+    case 'grid-module': {
+      // Build rowOf: one row per group, sorted by (tier, groupName)
+      const groupMeta = new Map(); // group -> { tier, name }
+      cy.nodes().forEach(n => {
+        const g = n.data('group') || '';
+        if (!groupMeta.has(g)) groupMeta.set(g, { tier: n.data('tier') || 0, name: g });
+      });
+      const sortedGroups = [...groupMeta.values()]
+        .sort((a, b) => (a.tier - b.tier) || a.name.localeCompare(b.name))
+        .map(m => m.name);
+      const rowOf = {};
+      sortedGroups.forEach((g, i) => { rowOf[g] = i; });
+
+      // Build colOf: nodes within each group sorted by label
+      const groupNodes = {};
+      cy.nodes().forEach(n => {
+        const g = n.data('group') || '';
+        (groupNodes[g] = groupNodes[g] || []).push(n);
+      });
+      const colOf = {};
+      Object.values(groupNodes).forEach(nodes => {
+        nodes.sort((a, b) => String(a.data('label')).localeCompare(String(b.data('label'))));
+        nodes.forEach((n, i) => { colOf[n.id()] = i; });
+      });
+
       return cy.layout({
         name: 'grid',
-        avoidOverlap: true,
-        padding: 20,
         fit: true,
-        sort: (a, b) =>
-          (a.data('tier') - b.data('tier')) ||
-          String(a.data('group') || '').localeCompare(String(b.data('group') || '')) ||
-          String(a.data('label')).localeCompare(String(b.data('label'))),
+        padding: 20,
+        avoidOverlap: true,
+        position: (node) => ({ row: rowOf[node.data('group')] ?? 0, col: colOf[node.id()] ?? 0 }),
       });
+    }
     default: // 'dagre'
       return cy.layout({
         name: 'dagre',
