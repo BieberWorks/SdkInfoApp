@@ -177,6 +177,7 @@ export function setData(elementId, nodes, edges) {
         id: n.id,
         label: n.label,
         tier: n.tier,
+        releaseOrder: n.releaseOrder ?? null,
         ciStatus: n.ciStatus,
         hasLocalDev: n.hasLocalDev,
         group: n.group,
@@ -444,6 +445,21 @@ function buildLayout(cy, layoutName) {
           (a.data('tier') - b.data('tier')) ||
           String(a.data('label')).localeCompare(String(b.data('label'))),
       });
+    case 'grid-release': {
+      const releaseOrderOf = n => {
+        const ro = n.data('releaseOrder');
+        return ro !== null && ro !== undefined ? ro : 9999;
+      };
+      return cy.layout({
+        name: 'grid',
+        avoidOverlap: true,
+        padding: 20,
+        fit: true,
+        sort: (a, b) =>
+          (releaseOrderOf(a) - releaseOrderOf(b)) ||
+          String(a.data('label')).localeCompare(String(b.data('label'))),
+      });
+    }
     case 'grid-name':
       return cy.layout({
         name: 'grid',

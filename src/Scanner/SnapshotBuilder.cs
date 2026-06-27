@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SdkInfoApp.Scanner.Model;
+using System.Reflection;
+using System.Text.Json;
 
 namespace SdkInfoApp.Scanner;
 
@@ -19,8 +21,11 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         var edges = new List<EdgeInfo>();
         var capabilityMap = new Dictionary<string, CapabilityInfo>(StringComparer.OrdinalIgnoreCase);
 
-        // Assign tiers: 0 = no deps on other SDK modules, higher = deeper in DAG
+        // Compute dependency tiers via impl-only longest-path DFS (cycle-safe)
         var tierMap = ComputeTiers(repoInfos);
+
+        // Load curated release-order map
+        var releaseOrderMap = LoadReleaseOrderMap();
 
         foreach (var (repoId, scan) in repoInfos)
         {
@@ -33,6 +38,7 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
                 Id = repoId,
                 RepoName = repoId,
                 Tier = tierMap.GetValueOrDefault(repoId, 0),
+                ReleaseOrder = releaseOrderMap.TryGetValue(repoId, out var ro) ? ro : null,
                 Packages = scan.OwnPackages,
                 LatestGhVersion = gh?.LatestGhVersion,
                 LocalDevVersion = snapshotMode == "local" ? localDev : null,
@@ -101,6 +107,9 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         var capabilities = capabilityMap.Values.OrderBy(c => c.Id).ToList();
         var capabilityGroups = BuildCapabilityGroups(capabilities);
 
+        // Drift check: warn when a module's impl-dep has a higher release-order
+        var driftWarnings = CheckReleaseOrderDrift(repoInfos, releaseOrderMap, edges);
+
         return new SdkSnapshot
         {
             SnapshotMode = snapshotMode,
@@ -112,6 +121,7 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
             CapabilityGroups = capabilityGroups,
             PackageNodes = packageNodes,
             PackageEdges = packageEdges,
+            Warnings = driftWarnings,
         };
     }
 
@@ -130,6 +140,18 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Capability ID '{CapId}' defined in multiple modules with different labels: '{ExistingLabel}' vs '{NewLabel}' (in {RepoId})")]
     private partial void LogCapabilityLabelConflict(string capId, string existingLabel, string newLabel, string repoId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "release-order.json embedded resource not found; releaseOrder will be null for all modules")]
+    private partial void LogReleaseOrderResourceMissing();
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Failed to load release-order.json: {Error}")]
+    private partial void LogReleaseOrderLoadFailed(string error);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "release-order drift: {Module} (order {ModuleOrder}) impl-depends on {Dep} (order {DepOrder})")]
+    private partial void LogReleaseOrderDrift(string module, int moduleOrder, string dep, int depOrder);
 
     private static (List<PackageNode> nodes, List<PackageEdge> edges) BuildPackageGraph(
         Dictionary<string, RepoScanResult> repoInfos,
@@ -189,111 +211,122 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
     }
 
     /// <summary>
-    /// Computes tiers using Kahn's topological sort on the repo-level DAG.
-    /// Cycles are broken by ignoring back-edges that would increase a node's
-    /// tier beyond that of a node already in the same SCC; the result is a
-    /// best-effort layering consistent with the observable dependency direction.
+    /// Computes dependency tiers via impl-only longest-path DFS (memoised, cycle-safe).
+    /// tier(m) = 0 when m has no impl-deps on other SDK modules;
+    /// otherwise 1 + max(tier(dep)).
     /// </summary>
     private static Dictionary<string, int> ComputeTiers(Dictionary<string, RepoScanResult> repoInfos)
     {
         var allRepos = repoInfos.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Build a deduplicated repo-level adjacency (from → targets)
-        var adj = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-
+        // Build impl-only adjacency: repoId → set of repos it impl-depends on
+        var implAdj = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var id in allRepos)
-        {
-            adj[id] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            inDegree[id] = 0;
-        }
+            implAdj[id] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (repoId, scan) in repoInfos)
         {
             foreach (var edge in scan.Edges)
             {
                 if (!allRepos.Contains(edge.TargetRepoId)) continue;
-                if (adj[repoId].Add(edge.TargetRepoId))
-                    inDegree[edge.TargetRepoId]++;
+                if (edge.TargetRepoId.Equals(repoId, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var isContracts = edge.PackageRef.Contains(".Contracts", StringComparison.OrdinalIgnoreCase);
+                if (!isContracts)
+                    implAdj[repoId].Add(edge.TargetRepoId);
             }
         }
 
-        // Kahn's BFS — nodes with in-degree 0 go to tier 0, etc.
-        var tiers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var queue = new Queue<string>();
+        var memo = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        int Dfs(string id)
+        {
+            if (memo.TryGetValue(id, out var cached)) return cached;
+            if (!visiting.Add(id)) return 0; // cycle guard
+
+            var deps = implAdj.TryGetValue(id, out var set) ? set : [];
+            var maxDepTier = deps.Count > 0 ? deps.Max(Dfs) : -1;
+            var tier = maxDepTier + 1;
+
+            visiting.Remove(id);
+            memo[id] = tier;
+            return tier;
+        }
 
         foreach (var id in allRepos)
-            if (inDegree[id] == 0) queue.Enqueue(id);
+            Dfs(id);
 
-        while (queue.Count > 0)
+        return memo;
+    }
+
+    /// <summary>
+    /// Loads the curated release-order map from the embedded resource.
+    /// Returns an empty dictionary (with a warning log) when the resource is missing.
+    /// </summary>
+    private Dictionary<string, int> LoadReleaseOrderMap()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var resourceName = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("release-order.json", StringComparison.OrdinalIgnoreCase));
+
+        if (resourceName is null)
         {
-            var node = queue.Dequeue();
-            var nodeTier = tiers.GetValueOrDefault(node, 0);
-
-            foreach (var dep in adj[node])
-            {
-                // dep is something node points TO — dep is "lower" (Foundation-level)
-                // We invert: caller is higher tier than callee.
-                // Actually our edges go FROM consumer TO dependency.
-                // So if A->B, A depends on B, B is lower tier (tier of B <= tier of A - 1).
-                // Kahn processes sources (no incoming = no dependents = leaf dependencies) first → tier 0.
-            }
-
-            // Actually rebuild: reverse the graph for Kahn so leaves (no outgoing deps) process first.
-            // Let's use a simpler iterative longest-path approach with cycle detection.
-            break;
+            LogReleaseOrderResourceMissing();
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         }
 
-        // Simpler: reverse-topological sort using longest path from leaves.
-        // "leaf" = module with no dependencies on other SDK modules (tier 0)
-        // Build reverse: who depends on whom
-        var dependedOnBy = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var id in allRepos) dependedOnBy[id] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var stream = asm.GetManifestResourceStream(resourceName)!;
+            var map = JsonSerializer.Deserialize<Dictionary<string, int>>(stream);
+            return map is not null
+                ? new Dictionary<string, int>(map, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            LogReleaseOrderLoadFailed(ex.Message);
+            return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
 
-        var outDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var id in allRepos) outDegree[id] = 0;
+    /// <summary>
+    /// For each module m with a release-order, checks whether any impl-dep d has a higher
+    /// release-order than m (i.e., d would be promoted later, but m depends on it already).
+    /// Emits a warning per drift pair and returns the collected warning strings.
+    /// </summary>
+    private List<string> CheckReleaseOrderDrift(
+        Dictionary<string, RepoScanResult> repoInfos,
+        Dictionary<string, int> releaseOrderMap,
+        List<EdgeInfo> edges)
+    {
+        var warnings = new List<string>();
 
-        // adj[A] = B means A depends on B. outDegree = number of deps A has.
+        // Index impl-edges by From for quick lookup
+        var implEdgesFrom = edges
+            .Where(e => e.Kind == "impl")
+            .GroupBy(e => e.From, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.To).ToList(), StringComparer.OrdinalIgnoreCase);
+
         foreach (var (repoId, _) in repoInfos)
         {
-            foreach (var dep in adj[repoId])
+            if (!releaseOrderMap.TryGetValue(repoId, out var om)) continue;
+            if (!implEdgesFrom.TryGetValue(repoId, out var deps)) continue;
+
+            foreach (var dep in deps)
             {
-                dependedOnBy[dep].Add(repoId); // dep is needed by repoId
-                outDegree[repoId]++;
+                if (!releaseOrderMap.TryGetValue(dep, out var od)) continue;
+                if (od > om)
+                {
+                    var msg = $"release-order drift: {repoId} (order {om}) impl-depends on {dep} (order {od})";
+                    LogReleaseOrderDrift(repoId, om, dep, od);
+                    warnings.Add(msg);
+                }
             }
         }
 
-        // Kahn from leaves (outDegree=0 = no dependencies = Tier 0)
-        tiers.Clear();
-        var q = new Queue<string>();
-        foreach (var id in allRepos)
-        {
-            if (outDegree[id] == 0) { tiers[id] = 0; q.Enqueue(id); }
-        }
-
-        while (q.Count > 0)
-        {
-            var node = q.Dequeue();
-            var nodeTier = tiers[node];
-
-            foreach (var dependent in dependedOnBy[node])
-            {
-                var newTier = nodeTier + 1;
-                if (!tiers.TryGetValue(dependent, out var existingTier) || newTier > existingTier)
-                    tiers[dependent] = newTier;
-
-                outDegree[dependent]--;
-                if (outDegree[dependent] <= 0)
-                    q.Enqueue(dependent);
-            }
-        }
-
-        // Nodes in cycles never reached Kahn (outDegree never hit 0) — assign fallback tier
-        int maxTier = tiers.Count > 0 ? tiers.Values.Max() : 0;
-        foreach (var id in allRepos)
-            tiers.TryAdd(id, maxTier + 1);
-
-        return tiers;
+        return warnings;
     }
 
     /// <summary>

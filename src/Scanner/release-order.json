@@ -1,0 +1,21 @@
+{
+  "SDK-Foundation": 0,
+  "SDK-Presentation": 0,
+  "SDK-UI": 1,
+  "SDK-Components": 1,
+  "SDK-Export": 1,
+  "SDK-Auth": 2,
+  "SDK-Admin": 2,
+  "SDK-Settings": 2,
+  "SDK-Account": 2,
+  "SDK-Storage": 3,
+  "SDK-Theme": 3,
+  "SDK-Email": 4,
+  "SDK-Audit": 4,
+  "SDK-Pages": 4,
+  "SDK-Legal": 4,
+  "SDK-Wallet": 4,
+  "SDK-Localization": 4,
+  "SDK-Maintenance": 5,
+  "SDK-Notifications": 5
+}

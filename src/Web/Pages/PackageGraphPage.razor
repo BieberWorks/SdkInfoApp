@@ -54,6 +54,7 @@
                 <MudSelectItem T="string" Value="@("cose")">Force-directed</MudSelectItem>
                 <MudSelectItem T="string" Value="@("concentric-tier")">Concentric by Tier</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-tier")">Grid by Tier</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-release")">Grid by Release Order</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-module")">Grid by Module</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-name")">Grid A–Z</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-dependents")">Grid by Dependents</MudSelectItem>
@@ -115,7 +116,17 @@
             </div>
             <div class="d-flex align-center gap-1 mb-2">
                 <MudChip T="string" Color="Color.Secondary" Size="Size.Small">@_selectedPackage.Module</MudChip>
-                <MudChip T="string" Color="Color.Primary" Size="Size.Small">Tier @_selectedPackage.Tier</MudChip>
+                @{
+                    var selMod = SnapshotService.GetModule(_selectedPackage.Module);
+                }
+                @if (selMod?.ReleaseOrder.HasValue == true)
+                {
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">Dep-Tier T@(_selectedPackage.Tier) · Release @selMod.ReleaseOrder</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">Tier @_selectedPackage.Tier</MudChip>
+                }
             </div>
             <MudDivider Class="my-2" />
             <MudText Typo="Typo.subtitle2">Depends on</MudText>

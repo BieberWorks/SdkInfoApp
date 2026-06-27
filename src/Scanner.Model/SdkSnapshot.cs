@@ -34,6 +34,9 @@ public sealed record SdkSnapshot
 
     [JsonPropertyName("packageEdges")]
     public IReadOnlyList<PackageEdge> PackageEdges { get; init; } = [];
+
+    [JsonPropertyName("warnings")]
+    public IReadOnlyList<string> Warnings { get; init; } = [];
 }
 
 public sealed record ModuleInfo
@@ -61,6 +64,9 @@ public sealed record ModuleInfo
 
     [JsonPropertyName("description")]
     public string? Description { get; init; }
+
+    [JsonPropertyName("releaseOrder")]
+    public int? ReleaseOrder { get; init; }
 
     [JsonPropertyName("capabilities")]
     public IReadOnlyList<string> Capabilities { get; init; } = [];

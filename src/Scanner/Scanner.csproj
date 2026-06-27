@@ -18,4 +18,8 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="release-order.json" />
+  </ItemGroup>
+
 </Project>

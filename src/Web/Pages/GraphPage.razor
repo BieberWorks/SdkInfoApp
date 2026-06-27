@@ -37,6 +37,7 @@
                 <MudSelectItem T="string" Value="@("cose")">Force-directed</MudSelectItem>
                 <MudSelectItem T="string" Value="@("concentric-tier")">Concentric by Tier</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-tier")">Grid by Tier</MudSelectItem>
+                <MudSelectItem T="string" Value="@("grid-release")">Grid by Release Order</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-module")">Grid by Module</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-name")">Grid A–Z</MudSelectItem>
                 <MudSelectItem T="string" Value="@("grid-dependents")">Grid by Dependents</MudSelectItem>
@@ -90,7 +91,14 @@
                 <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseDetail" />
             </div>
             <div class="d-flex flex-wrap gap-1 mb-2">
-                <MudChip T="string" Color="Color.Primary" Size="Size.Small">Tier @_selectedModule.Tier</MudChip>
+                @if (_selectedModule.ReleaseOrder.HasValue)
+                {
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">Dep-Tier T@(_selectedModule.Tier) · Release @_selectedModule.ReleaseOrder</MudChip>
+                }
+                else
+                {
+                    <MudChip T="string" Color="Color.Primary" Size="Size.Small">Tier @_selectedModule.Tier</MudChip>
+                }
                 <CiStatusChip Status="@_selectedModule.CiStatus" />
             </div>
             <VersionBadge GhVersion="@_selectedModule.LatestGhVersion"
@@ -183,6 +191,7 @@
                 CiStatus = m.CiStatus,
                 HasLocalDev = m.LocalDevPresent,
                 Group = m.Id,
+                ReleaseOrder = m.ReleaseOrder,
             })
             .ToList();
 
