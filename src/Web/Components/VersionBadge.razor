@@ -2,7 +2,7 @@
     @if (!string.IsNullOrEmpty(GhVersion))
     {
         <MudChip T="string" Size="Size.Small" Color="Color.Default" Icon="@Icons.Custom.Brands.GitHub">
-            v@GhVersion
+            v@(GhVersion)
         </MudChip>
     }
     else

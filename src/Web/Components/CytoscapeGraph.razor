@@ -8,11 +8,13 @@
     [Parameter] public IReadOnlyList<CyEdge> Edges { get; set; } = [];
     [Parameter] public string Height { get; set; } = "600px";
     [Parameter] public EventCallback<string> OnNodeClicked { get; set; }
+    [Parameter] public EventCallback OnBackgroundTapped { get; set; }
 
     private readonly string _elementId = $"cy-{Guid.NewGuid():N}";
     private IJSObjectReference? _module;
     private DotNetObjectReference<CytoscapeGraph>? _dotNetRef;
     private bool _initialized;
+    private string _lastDataSignature = "";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -26,16 +28,43 @@
 
         if (_initialized && _module is not null)
         {
-            await _module.InvokeVoidAsync("setData", _elementId, Nodes, Edges);
+            var sig = ComputeSignature(Nodes, Edges);
+            if (sig != _lastDataSignature)
+            {
+                _lastDataSignature = sig;
+                await _module.InvokeVoidAsync("setData", _elementId, Nodes, Edges);
+            }
         }
+    }
+
+    public async Task HighlightAsync(IReadOnlyList<string> ids)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("highlightNodes", _elementId, ids);
+    }
+
+    public async Task ClearHighlightAsync()
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("resetHighlight", _elementId);
     }
 
     [JSInvokable]
     public Task NodeClickedAsync(string nodeId) => OnNodeClicked.InvokeAsync(nodeId);
 
+    [JSInvokable]
+    public Task BackgroundTappedAsync() => OnBackgroundTapped.InvokeAsync();
+
     public async ValueTask DisposeAsync()
     {
         _dotNetRef?.Dispose();
         if (_module is not null) await _module.DisposeAsync();
+    }
+
+    private static string ComputeSignature(IReadOnlyList<CyNode> nodes, IReadOnlyList<CyEdge> edges)
+    {
+        var nodesPart = string.Join(",", nodes.Select(n => n.Id));
+        var edgesPart = string.Join(",", edges.Select(e => $"{e.Source}->{e.Target}"));
+        return $"{nodesPart}|{edgesPart}";
     }
 }

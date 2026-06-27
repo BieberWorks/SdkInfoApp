@@ -40,6 +40,7 @@ export function initGraph(elementId, dotNetRef) {
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
       cy.elements().removeClass('highlighted dimmed');
+      dotNetRef.invokeMethodAsync('BackgroundTappedAsync');
     }
   });
 
