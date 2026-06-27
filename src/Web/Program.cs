@@ -15,5 +15,6 @@ builder.Services.AddScoped(sp =>
 });
 
 builder.Services.AddScoped<SnapshotService>();
+builder.Services.AddScoped<ThemeService>();
 
 await builder.Build().RunAsync();

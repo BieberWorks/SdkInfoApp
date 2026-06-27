@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject SnapshotService Snapshot
+@inject ThemeService ThemeService
 @inject NavigationManager Nav
 
 <MudLayout>
@@ -15,6 +16,9 @@
                 @(Snapshot.IsLocalMode ? "Local Dev" : "Release")
             </MudChip>
         }
+        <MudIconButton Color="Color.Inherit"
+                       Icon="@(ThemeService.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                       OnClick="ToggleTheme" />
     </MudAppBar>
 
     <MudDrawer @bind-Open="_drawerOpen" Elevation="2" Variant="DrawerVariant.Responsive">
@@ -45,7 +49,10 @@
     {
         await Snapshot.LoadAsync();
         Snapshot.OnChange += StateHasChanged;
+        ThemeService.Changed += StateHasChanged;
     }
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private async Task ToggleTheme() => await ThemeService.ToggleAsync();
 }

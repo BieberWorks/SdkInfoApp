@@ -1,5 +1,8 @@
 @using MudBlazor
-<MudThemeProvider />
+@using SdkInfoApp.Web.Services
+@inject ThemeService ThemeService
+
+<MudThemeProvider IsDarkMode="ThemeService.IsDarkMode" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -13,3 +16,11 @@
         <MudText Typo="Typo.h5">Page not found.</MudText>
     </NotFound>
 </Router>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        ThemeService.Changed += StateHasChanged;
+        await ThemeService.InitializeAsync();
+    }
+}
