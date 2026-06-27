@@ -5,4 +5,7 @@
     <Project Path="src/Web/Web.csproj" />
     <Project Path="src/Mcp/Mcp.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Scanner.Tests/Scanner.Tests.csproj" />
+  </Folder>
 </Solution>

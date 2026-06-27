@@ -21,11 +21,20 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         var edges = new List<EdgeInfo>();
         var capabilityMap = new Dictionary<string, CapabilityInfo>(StringComparer.OrdinalIgnoreCase);
 
+        // Build the set of all known SDK package IDs across all repos (for dangling-ref detection)
+        var knownPackageIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var scan in repoInfos.Values)
+            foreach (var pkg in scan.OwnPackages)
+                knownPackageIds.Add(pkg);
+
         // Compute dependency tiers via impl-only longest-path DFS (cycle-safe)
         var tierMap = ComputeTiers(repoInfos);
 
         // Load curated release-order map
         var releaseOrderMap = LoadReleaseOrderMap();
+
+        // Dangling-ref tracking: warnings deduplicated
+        var danglingWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var (repoId, scan) in repoInfos)
         {
@@ -72,6 +81,15 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
                 });
             }
 
+            // Detect dangling SDK references: BieberWorks.SDK.* refs not in the known package set
+            foreach (var pkgEdge in scan.PackageEdges)
+            {
+                if (knownPackageIds.Contains(pkgEdge.RefPackageId)) continue;
+                if (!pkgEdge.RefPackageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)) continue;
+
+                danglingWarnings.Add($"{repoId} references unknown SDK package '{pkgEdge.RefPackageId}' (renamed/removed?)");
+            }
+
             if (manifest is not null)
             {
                 foreach (var cap in manifest.Capabilities)
@@ -102,13 +120,24 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         modules.Sort((a, b) => a.Tier != b.Tier ? a.Tier.CompareTo(b.Tier) : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
 
         // Build package-level graph
-        var (packageNodes, packageEdges) = BuildPackageGraph(repoInfos, tierMap);
+        var (packageNodes, packageEdges) = BuildPackageGraph(repoInfos, tierMap, knownPackageIds);
+
+        // Emit dangling module-level edges where the derived module exists in our repo set
+        var danglingModuleEdges = BuildDanglingModuleEdges(repoInfos, knownPackageIds);
+        foreach (var de in danglingModuleEdges)
+            edges.Add(de);
 
         var capabilities = capabilityMap.Values.OrderBy(c => c.Id).ToList();
         var capabilityGroups = BuildCapabilityGroups(capabilities);
 
         // Drift check: warn when a module's impl-dep has a higher release-order
-        var driftWarnings = CheckReleaseOrderDrift(repoInfos, releaseOrderMap, edges);
+        var driftWarnings = CheckReleaseOrderDrift(repoInfos, releaseOrderMap, [.. edges.Where(e => e.Kind != "dangling")]);
+
+        // Combine all warnings (dangling first, then drift)
+        var allWarnings = danglingWarnings
+            .OrderBy(w => w, StringComparer.OrdinalIgnoreCase)
+            .Concat(driftWarnings)
+            .ToList();
 
         return new SdkSnapshot
         {
@@ -121,8 +150,60 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
             CapabilityGroups = capabilityGroups,
             PackageNodes = packageNodes,
             PackageEdges = packageEdges,
-            Warnings = driftWarnings,
+            Warnings = allWarnings,
         };
+    }
+
+    /// <summary>
+    /// For every raw package edge whose target is not a known package, emit a module-level
+    /// dangling edge if the inferred module exists in our repo set.
+    /// </summary>
+    private static List<EdgeInfo> BuildDanglingModuleEdges(
+        Dictionary<string, RepoScanResult> repoInfos,
+        HashSet<string> knownPackageIds)
+    {
+        var edgeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<EdgeInfo>();
+
+        foreach (var (repoId, scan) in repoInfos)
+        {
+            foreach (var pkgEdge in scan.PackageEdges)
+            {
+                if (knownPackageIds.Contains(pkgEdge.RefPackageId)) continue;
+                if (!pkgEdge.RefPackageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var derivedModule = DeriveModuleFromPackageId(pkgEdge.RefPackageId);
+                if (derivedModule is null || !repoInfos.ContainsKey(derivedModule)) continue;
+                if (string.Equals(derivedModule, repoId, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var key = $"{repoId}→{derivedModule}";
+                if (!edgeSet.Add(key)) continue;
+
+                result.Add(new EdgeInfo
+                {
+                    From = repoId,
+                    To = derivedModule,
+                    PackageRef = pkgEdge.RefPackageId,
+                    VersionRange = pkgEdge.VersionRange,
+                    Kind = "dangling",
+                });
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Derives a module repo ID (e.g. "SDK-Components") from a package ID prefix
+    /// like "BieberWorks.SDK.Components.*". Returns null when the segment count is insufficient.
+    /// </summary>
+    private static string? DeriveModuleFromPackageId(string packageId)
+    {
+        // BieberWorks.SDK.{ModuleName}[.anything]
+        // Split on '.' and take the 3rd segment (index 2) as the module name
+        var parts = packageId.Split('.');
+        if (parts.Length < 3) return null;
+        return $"SDK-{parts[2]}";
     }
 
     private static List<CapabilityGroup> BuildCapabilityGroups(List<CapabilityInfo> capabilities)
@@ -155,7 +236,8 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
 
     private static (List<PackageNode> nodes, List<PackageEdge> edges) BuildPackageGraph(
         Dictionary<string, RepoScanResult> repoInfos,
-        Dictionary<string, int> tierMap)
+        Dictionary<string, int> tierMap,
+        HashSet<string> knownPackageIds)
     {
         // All known SDK package ids → their owning repo
         var pkgToRepo = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -176,10 +258,6 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
                 });
             }
         }
-
-        nodes.Sort((a, b) => a.Tier != b.Tier
-            ? a.Tier.CompareTo(b.Tier)
-            : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
 
         // Collect all package-level edges; only include edges where BOTH endpoints are known SDK packages
         var edgeSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -206,6 +284,55 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
                 });
             }
         }
+
+        // Add dangling package edges: synthetic node for the unknown package + dangling edge
+        foreach (var (repoId, scan) in repoInfos)
+        {
+            foreach (var raw in scan.PackageEdges)
+            {
+                if (knownPackageIds.Contains(raw.RefPackageId)) continue;
+                if (!raw.RefPackageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var dedupeKey = $"{raw.OwnerPackageId}→{raw.RefPackageId}";
+                if (!edgeSet.Add(dedupeKey)) continue;
+
+                // Ensure the synthetic target node exists
+                if (nodes.All(n => !string.Equals(n.Id, raw.RefPackageId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var derivedModule = DeriveModuleFromPackageId(raw.RefPackageId) ?? repoId;
+                    nodes.Add(new PackageNode
+                    {
+                        Id = raw.RefPackageId,
+                        Module = derivedModule,
+                        Tier = tierMap.GetValueOrDefault(derivedModule, 0),
+                        IsDangling = true,
+                    });
+                }
+
+                // Ensure the owning package node exists
+                if (nodes.All(n => !string.Equals(n.Id, raw.OwnerPackageId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    nodes.Add(new PackageNode
+                    {
+                        Id = raw.OwnerPackageId,
+                        Module = repoId,
+                        Tier = tierMap.GetValueOrDefault(repoId, 0),
+                    });
+                }
+
+                edges.Add(new PackageEdge
+                {
+                    From = raw.OwnerPackageId,
+                    To = raw.RefPackageId,
+                    VersionRange = raw.VersionRange,
+                    Kind = "dangling",
+                });
+            }
+        }
+
+        nodes.Sort((a, b) => a.Tier != b.Tier
+            ? a.Tier.CompareTo(b.Tier)
+            : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
 
         return (nodes, edges);
     }

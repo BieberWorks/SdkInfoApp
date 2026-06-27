@@ -181,6 +181,7 @@ export function setData(elementId, nodes, edges) {
         ciStatus: n.ciStatus,
         hasLocalDev: n.hasLocalDev,
         group: n.group,
+        isDangling: n.isDangling ?? false,
       }
     })),
     ...edges.map(e => ({
@@ -634,6 +635,24 @@ function buildStyle() {
     {
       selector: 'edge[kind = "contracts"]',
       style: { 'line-color': '#42a5f5', 'target-arrow-color': '#42a5f5', 'line-style': 'dashed' },
+    },
+    {
+      selector: 'edge[kind = "dangling"]',
+      style: {
+        'line-color': '#f44336',
+        'target-arrow-color': '#f44336',
+        'line-style': 'dotted',
+        'width': 2.5,
+      },
+    },
+    {
+      selector: 'node[?isDangling]',
+      style: {
+        'border-width': 3,
+        'border-color': '#f44336',
+        'border-style': 'dashed',
+        'background-color': '#b71c1c',
+      },
     },
     {
       selector: 'node:selected',

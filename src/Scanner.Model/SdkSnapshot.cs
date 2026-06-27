@@ -140,6 +140,9 @@ public sealed record PackageNode
 
     [JsonPropertyName("tier")]
     public int Tier { get; init; }
+
+    [JsonPropertyName("isDangling")]
+    public bool IsDangling { get; init; }
 }
 
 public sealed record PackageEdge

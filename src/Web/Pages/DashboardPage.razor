@@ -62,6 +62,23 @@
     Snapshot: @snapshot.SnapshotMode — generated @snapshot.GeneratedAt.ToLocalTime().ToString("g")
 </MudText>
 
+@if (snapshot.Warnings.Count > 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="mb-4">
+        <MudText Typo="Typo.subtitle2">@snapshot.Warnings.Count snapshot warning(s)</MudText>
+        <MudCollapse Expanded="false">
+            <MudList T="string" Dense="true">
+                @foreach (var w in snapshot.Warnings)
+                {
+                    <MudListItem T="string">
+                        <MudText Typo="Typo.body2">@w</MudText>
+                    </MudListItem>
+                }
+            </MudList>
+        </MudCollapse>
+    </MudAlert>
+}
+
 <DevOnlyPanel>
     <MudAlert Severity="Severity.Info" Class="mb-4">
         <MudText Typo="Typo.subtitle2">Local Dev Mode</MudText>

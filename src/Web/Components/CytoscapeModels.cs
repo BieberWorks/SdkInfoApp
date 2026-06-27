@@ -11,6 +11,7 @@ public sealed record CyNode
     [JsonPropertyName("hasLocalDev")] public bool HasLocalDev { get; init; }
     [JsonPropertyName("group")] public string Group { get; init; } = "";
     [JsonPropertyName("releaseOrder")] public int? ReleaseOrder { get; init; }
+    [JsonPropertyName("isDangling")] public bool IsDangling { get; init; }
 }
 
 public sealed record CyEdge
