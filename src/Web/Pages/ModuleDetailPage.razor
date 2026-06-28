@@ -74,14 +74,27 @@
     </MudItem>
 
     <MudItem xs="12" md="4">
+        @{
+            var depsFrom = SnapshotService.GetEdgesFrom(Module.Id).ToList();
+            var depsTo = SnapshotService.GetEdgesTo(Module.Id).ToList();
+            var transFrom = SnapshotService.GetTransitiveDependsOn(Module.Id);
+            var transTo = SnapshotService.GetTransitiveUsedBy(Module.Id);
+        }
+
+        @if (transFrom.Count > 0 || transTo.Count > 0)
+        {
+            <div class="d-flex justify-end mb-2">
+                <MudSwitch T="bool" Value="_showTransitive" ValueChanged="@(v => _showTransitive = v)"
+                           Color="Color.Primary" Size="Size.Small"
+                           Label="@($"Show transitive (+{transFrom.Count + transTo.Count})")" />
+            </div>
+        }
+
         <MudPaper Class="pa-4 mb-3" Elevation="1">
             <MudText Typo="Typo.h6" Class="mb-2">Depends On</MudText>
-            @{
-                var depsFrom = SnapshotService.GetEdgesFrom(Module.Id).ToList();
-            }
             @if (depsFrom.Count == 0)
             {
-                <MudText Typo="Typo.body2" Color="Color.Secondary">No upstream dependencies</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">No direct upstream dependencies</MudText>
             }
             @foreach (var edge in depsFrom)
             {
@@ -92,16 +105,26 @@
                     <MudLink Href="@($"/modules/{edge.To}")">@edge.To</MudLink>
                 </div>
             }
+            @if (_showTransitive && transFrom.Count > 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-2 mb-1">
+                    Transitive (via impl)
+                </MudText>
+                @foreach (var id in transFrom)
+                {
+                    <div class="d-flex align-center gap-1 mb-1" style="opacity:0.85;">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">transitive</MudChip>
+                        <MudLink Href="@($"/modules/{id}")">@id</MudLink>
+                    </div>
+                }
+            }
         </MudPaper>
 
         <MudPaper Class="pa-4" Elevation="1">
             <MudText Typo="Typo.h6" Class="mb-2">Used By</MudText>
-            @{
-                var depsTo = SnapshotService.GetEdgesTo(Module.Id).ToList();
-            }
             @if (depsTo.Count == 0)
             {
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Not referenced by any other module</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Not directly referenced by any other module</MudText>
             }
             @foreach (var edge in depsTo)
             {
@@ -111,6 +134,19 @@
                     </MudChip>
                     <MudLink Href="@($"/modules/{edge.From}")">@edge.From</MudLink>
                 </div>
+            }
+            @if (_showTransitive && transTo.Count > 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-2 mb-1">
+                    Transitive (any reference)
+                </MudText>
+                @foreach (var id in transTo)
+                {
+                    <div class="d-flex align-center gap-1 mb-1" style="opacity:0.85;">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">transitive</MudChip>
+                        <MudLink Href="@($"/modules/{id}")">@id</MudLink>
+                    </div>
+                }
             }
         </MudPaper>
 
@@ -130,6 +166,8 @@
 
 @code {
     [Parameter] public string? ModuleId { get; set; }
+
+    private bool _showTransitive;
 
     private ModuleInfo? Module => string.IsNullOrEmpty(ModuleId)
         ? null

@@ -129,15 +129,39 @@
                 <MudText Typo="Typo.caption" Style="font-family: monospace; display:block;">@pkg</MudText>
             }
             <MudDivider Class="my-2" />
+            @{
+                var transFrom = SnapshotService.GetTransitiveDependsOn(_selectedModule.Id);
+                var transTo = SnapshotService.GetTransitiveUsedBy(_selectedModule.Id);
+            }
+            @if (transFrom.Count > 0 || transTo.Count > 0)
+            {
+                <MudSwitch T="bool" Value="_showTransitive" ValueChanged="@(v => _showTransitive = v)"
+                           Color="Color.Primary" Size="Size.Small" Class="mb-1"
+                           Label="@($"Show transitive (+{transFrom.Count + transTo.Count})")" />
+            }
             <MudText Typo="Typo.subtitle2">Depends on</MudText>
             @foreach (var edge in SnapshotService.GetEdgesFrom(_selectedModule.Id))
             {
                 <MudText Typo="Typo.caption">→ @edge.To (@edge.Kind)</MudText><br />
             }
+            @if (_showTransitive)
+            {
+                @foreach (var id in transFrom)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7;">⤳ @id (transitive)</MudText><br />
+                }
+            }
             <MudText Typo="Typo.subtitle2" Class="mt-1">Used by</MudText>
             @foreach (var edge in SnapshotService.GetEdgesTo(_selectedModule.Id))
             {
                 <MudText Typo="Typo.caption">← @edge.From (@edge.Kind)</MudText><br />
+            }
+            @if (_showTransitive)
+            {
+                @foreach (var id in transTo)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7;">⤙ @id (transitive)</MudText><br />
+                }
             }
             <MudButton Class="mt-3" Variant="Variant.Outlined" Size="Size.Small"
                        OnClick="NavigateToDetail">
@@ -164,6 +188,7 @@
     private string _layoutMode = "dagre";
     private string[] _presentEdgeKinds = [];
     private IEnumerable<string> _visibleEdgeKinds = [];
+    private bool _showTransitive;
 
     protected override async Task OnInitializedAsync()
     {

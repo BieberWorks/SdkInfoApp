@@ -143,15 +143,39 @@
                 }
             </div>
             <MudDivider Class="my-2" />
+            @{
+                var pkgTransFrom = SnapshotService.GetTransitivePackageDependsOn(_selectedPackage.Id);
+                var pkgTransTo = SnapshotService.GetTransitivePackageUsedBy(_selectedPackage.Id);
+            }
+            @if (pkgTransFrom.Count > 0 || pkgTransTo.Count > 0)
+            {
+                <MudSwitch T="bool" Value="_showTransitive" ValueChanged="@(v => _showTransitive = v)"
+                           Color="Color.Primary" Size="Size.Small" Class="mb-1"
+                           Label="@($"Show transitive (+{pkgTransFrom.Count + pkgTransTo.Count})")" />
+            }
             <MudText Typo="Typo.subtitle2">Depends on</MudText>
             @foreach (var edge in SnapshotService.GetPackageEdgesFrom(_selectedPackage.Id))
             {
                 <MudText Typo="Typo.caption">→ @ShortLabel(edge.To) (@edge.Kind)</MudText><br />
             }
+            @if (_showTransitive)
+            {
+                @foreach (var id in pkgTransFrom)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7;">⤳ @ShortLabel(id) (transitive)</MudText><br />
+                }
+            }
             <MudText Typo="Typo.subtitle2" Class="mt-1">Used by</MudText>
             @foreach (var edge in SnapshotService.GetPackageEdgesTo(_selectedPackage.Id))
             {
                 <MudText Typo="Typo.caption">← @ShortLabel(edge.From) (@edge.Kind)</MudText><br />
+            }
+            @if (_showTransitive)
+            {
+                @foreach (var id in pkgTransTo)
+                {
+                    <MudText Typo="Typo.caption" Style="opacity:0.7;">⤙ @ShortLabel(id) (transitive)</MudText><br />
+                }
             }
         </MudPaper>
     }
@@ -176,6 +200,7 @@
     private string _combineMode = "base";
     private string[] _presentEdgeKinds = [];
     private IEnumerable<string> _visibleEdgeKinds = [];
+    private bool _showTransitive;
 
     protected override async Task OnInitializedAsync()
     {

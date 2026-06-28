@@ -152,4 +152,74 @@ public sealed class SnapshotService(HttpClient http, IJSRuntime js)
     /// </summary>
     public HashSet<string> TransitiveUpstreamClosure(IEnumerable<string> seeds)
         => _snapshot is null ? [] : SdkQuery.TransitiveUpstreamClosure(_snapshot, seeds);
+
+    private static readonly StringComparer Oic = StringComparer.OrdinalIgnoreCase;
+
+    /// <summary>
+    /// Modules this one depends on transitively (via <c>impl</c> edges) but NOT directly,
+    /// and excluding the module itself. Sorted by tier then id.
+    /// </summary>
+    public IReadOnlyList<string> GetTransitiveDependsOn(string moduleId)
+    {
+        if (_snapshot is null) return [];
+        var direct = _snapshot.Edges.Where(e => Oic.Equals(e.From, moduleId)).Select(e => e.To).ToHashSet(Oic);
+        return SdkQuery.TransitiveUpstreamClosure(_snapshot, [moduleId])
+            .Where(id => !Oic.Equals(id, moduleId) && !direct.Contains(id))
+            .OrderBy(id => GetModule(id)?.Tier ?? 99).ThenBy(id => id, Oic)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Modules that depend on this one transitively (over ALL edge kinds) but NOT directly,
+    /// and excluding the module itself — the full breaking-change impact ring. Sorted by tier then id.
+    /// </summary>
+    public IReadOnlyList<string> GetTransitiveUsedBy(string moduleId)
+    {
+        if (_snapshot is null) return [];
+        var direct = _snapshot.Edges.Where(e => Oic.Equals(e.To, moduleId)).Select(e => e.From).ToHashSet(Oic);
+        return SdkQuery.ReverseImpact(_snapshot, moduleId)
+            .Where(id => !Oic.Equals(id, moduleId) && !direct.Contains(id))
+            .OrderBy(id => GetModule(id)?.Tier ?? 99).ThenBy(id => id, Oic)
+            .ToList();
+    }
+
+    /// <summary>BFS closure over <see cref="SdkSnapshot.PackageEdges"/> (all kinds).</summary>
+    private HashSet<string> PackageClosure(string start, bool forward)
+    {
+        var visited = new HashSet<string>(Oic) { start };
+        var queue = new Queue<string>();
+        queue.Enqueue(start);
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            var next = forward
+                ? _snapshot!.PackageEdges.Where(e => Oic.Equals(e.From, current)).Select(e => e.To)
+                : _snapshot!.PackageEdges.Where(e => Oic.Equals(e.To, current)).Select(e => e.From);
+            foreach (var id in next)
+                if (visited.Add(id)) queue.Enqueue(id);
+        }
+        return visited;
+    }
+
+    /// <summary>Packages this one depends on transitively but not directly (excluding self).</summary>
+    public IReadOnlyList<string> GetTransitivePackageDependsOn(string packageId)
+    {
+        if (_snapshot is null) return [];
+        var direct = _snapshot.PackageEdges.Where(e => Oic.Equals(e.From, packageId)).Select(e => e.To).ToHashSet(Oic);
+        return PackageClosure(packageId, forward: true)
+            .Where(id => !Oic.Equals(id, packageId) && !direct.Contains(id))
+            .OrderBy(id => GetPackageNode(id)?.Tier ?? 99).ThenBy(id => id, Oic)
+            .ToList();
+    }
+
+    /// <summary>Packages that depend on this one transitively but not directly (excluding self).</summary>
+    public IReadOnlyList<string> GetTransitivePackageUsedBy(string packageId)
+    {
+        if (_snapshot is null) return [];
+        var direct = _snapshot.PackageEdges.Where(e => Oic.Equals(e.To, packageId)).Select(e => e.From).ToHashSet(Oic);
+        return PackageClosure(packageId, forward: false)
+            .Where(id => !Oic.Equals(id, packageId) && !direct.Contains(id))
+            .OrderBy(id => GetPackageNode(id)?.Tier ?? 99).ThenBy(id => id, Oic)
+            .ToList();
+    }
 }
