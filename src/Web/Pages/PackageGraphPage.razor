@@ -328,6 +328,7 @@
     private static string EdgeKindLabel(string kind) => kind switch
     {
         "impl" => "Impl",
+        "project" => "Project",
         "contracts" => "Contracts",
         "dangling" => "Dangling",
         _ => kind,
@@ -336,8 +337,9 @@
     private static int EdgeKindSortOrder(string kind) => kind switch
     {
         "impl" => 0,
-        "contracts" => 1,
-        "dangling" => 2,
+        "project" => 1,
+        "contracts" => 2,
+        "dangling" => 3,
         _ => 99,
     };
 

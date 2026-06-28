@@ -262,9 +262,11 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
                 var dedupeKey = $"{raw.OwnerPackageId}→{raw.RefPackageId}";
                 if (!edgeSet.Add(dedupeKey)) continue;
 
-                var kind = raw.RefPackageId.Contains(".Contracts", StringComparison.OrdinalIgnoreCase)
-                    ? "contracts"
-                    : "impl";
+                var kind = string.Equals(raw.RefType, "project", StringComparison.OrdinalIgnoreCase)
+                    ? "project"
+                    : raw.RefPackageId.Contains(".Contracts", StringComparison.OrdinalIgnoreCase)
+                        ? "contracts"
+                        : "impl";
 
                 edges.Add(new PackageEdge
                 {

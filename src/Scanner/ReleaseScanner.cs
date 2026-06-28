@@ -110,10 +110,12 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
         var buildPropsText = await GetFileContentAsync(org, repoId, "Directory.Build.props", defaultBranch, ct);
         var packagePrefix = CsprojParser.ReadPackagePrefixFromText(buildPropsText);
 
-        // 4. Parse each csproj (own packages + raw edges)
+        // 4. Fetch + parse each csproj once (cache path/packageId/text for project-ref resolution)
         var ownPackages = new List<string>();
         var rawEdges = new List<(string ownerPkg, string refPkg, string version)>();
+        var projectEdges = new List<(string ownerPkg, string refPkg)>();
 
+        var parsed = new List<(string path, string packageId, string text)>();
         foreach (var csprojPath in csprojPaths)
         {
             if (CsprojParser.IsTestProjectPath(csprojPath)) continue;
@@ -123,7 +125,17 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
 
             var projectFileName = Path.GetFileNameWithoutExtension(csprojPath);
             var packageId = CsprojParser.ReadPackageIdFromText(text, projectFileName, packagePrefix);
+            parsed.Add((csprojPath, packageId, text));
+        }
 
+        // Map csproj path → package id, so sibling ProjectReference paths resolve to a package
+        var pathToPkg = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, packageId, _) in parsed)
+            if (!string.IsNullOrEmpty(packageId))
+                pathToPkg[CsprojParser.NormalizeCsprojKey(path)] = packageId;
+
+        foreach (var (path, packageId, text) in parsed)
+        {
             if (packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
                 ownPackages.Add(packageId);
 
@@ -134,18 +146,38 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
                 if (refId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
                     rawEdges.Add((packageId, refId, version));
             }
+
+            foreach (var include in CsprojParser.ReadProjectReferencesFromText(text))
+            {
+                var targetKey = CsprojParser.ResolveProjectReferencePath(path, include);
+                if (pathToPkg.TryGetValue(targetKey, out var refPkg)
+                    && !string.Equals(refPkg, packageId, StringComparison.OrdinalIgnoreCase)
+                    && refPkg.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)
+                    && packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
+                {
+                    projectEdges.Add((packageId, refPkg));
+                }
+            }
         }
 
         // 5. Manifest
         var manifestText = await GetFileContentAsync(org, repoId, "module.manifest.json", defaultBranch, ct);
         var manifest = ParseManifest(repoId, manifestText);
 
-        // Store raw edges; cross-repo resolution happens after all repos are scanned
-        var pkgEdges = rawEdges
-            .Where(e => e.ownerPkg != e.refPkg)
-            .DistinctBy(e => $"{e.ownerPkg}→{e.refPkg}")
-            .Select(e => new RawPackageEdge(e.ownerPkg, e.refPkg, e.version))
-            .ToList();
+        // Store raw edges; cross-repo resolution happens after all repos are scanned.
+        // PackageReferences first, then sibling ProjectReferences as a distinct "project" type.
+        var pkgEdges = new List<RawPackageEdge>();
+        var seenPkgEdge = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in rawEdges.Where(e => e.ownerPkg != e.refPkg))
+        {
+            if (seenPkgEdge.Add($"{e.ownerPkg}→{e.refPkg}"))
+                pkgEdges.Add(new RawPackageEdge(e.ownerPkg, e.refPkg, e.version));
+        }
+        foreach (var e in projectEdges)
+        {
+            if (seenPkgEdge.Add($"{e.ownerPkg}→{e.refPkg}"))
+                pkgEdges.Add(new RawPackageEdge(e.ownerPkg, e.refPkg, "", "project"));
+        }
 
         LogRepoScanned(repoId, ownPackages.Count, manifest is not null);
         return new RepoScanResult(repoId, ownPackages, [], pkgEdges, manifest);

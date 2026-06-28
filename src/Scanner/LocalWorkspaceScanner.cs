@@ -71,6 +71,18 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
 
         // Per-csproj: ownerPackageId → list of (refPackageId, version)
         var perCsprojEdges = new List<(string ownerPkg, string refPkg, string version)>();
+        // Intra-repo ProjectReference edges (ownerPkg → siblingPkg)
+        var projectEdges = new List<(string ownerPkg, string refPkg)>();
+
+        // Map every non-test csproj path → its package id, so ProjectReference paths can be resolved.
+        var pathToPkg = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var csproj in csprojFiles)
+        {
+            if (IsTestProject(csproj)) continue;
+            var pid = ReadPackageId(csproj, packagePrefix);
+            if (!string.IsNullOrEmpty(pid))
+                pathToPkg[CsprojParser.NormalizeCsprojKey(csproj)] = pid;
+        }
 
         foreach (var csproj in csprojFiles)
         {
@@ -88,6 +100,19 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
                 if (refId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
                     perCsprojEdges.Add((packageId, refId, version));
             }
+
+            // Resolve sibling ProjectReferences to their package ids (intra-repo only)
+            foreach (var include in ReadProjectReferences(csproj))
+            {
+                var targetKey = CsprojParser.ResolveProjectReferencePath(csproj, include);
+                if (pathToPkg.TryGetValue(targetKey, out var refPkg)
+                    && !string.Equals(refPkg, packageId, StringComparison.OrdinalIgnoreCase)
+                    && refPkg.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)
+                    && packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
+                {
+                    projectEdges.Add((packageId, refPkg));
+                }
+            }
         }
 
         // Repo-level edges (deduplicated by referenced package, cross-repo only)
@@ -102,12 +127,20 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
                 edges.Add(new ParsedEdge(pkgRef, targetRepo, version));
         }
 
-        // Package-level edges (deduplicated by ownerPkg+refPkg pair, cross-package)
-        var pkgEdges = perCsprojEdges
-            .Where(e => e.ownerPkg != e.refPkg)
-            .DistinctBy(e => $"{e.ownerPkg}→{e.refPkg}")
-            .Select(e => new RawPackageEdge(e.ownerPkg, e.refPkg, e.version))
-            .ToList();
+        // Package-level edges (deduplicated by ownerPkg+refPkg pair). PackageReferences first,
+        // then sibling ProjectReferences as a distinct "project" edge type.
+        var pkgEdges = new List<RawPackageEdge>();
+        var seenPkgEdge = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in perCsprojEdges.Where(e => e.ownerPkg != e.refPkg))
+        {
+            if (seenPkgEdge.Add($"{e.ownerPkg}→{e.refPkg}"))
+                pkgEdges.Add(new RawPackageEdge(e.ownerPkg, e.refPkg, e.version));
+        }
+        foreach (var e in projectEdges)
+        {
+            if (seenPkgEdge.Add($"{e.ownerPkg}→{e.refPkg}"))
+                pkgEdges.Add(new RawPackageEdge(e.ownerPkg, e.refPkg, "", "project"));
+        }
 
         var manifest = TryReadManifest(dir, repoId);
 
@@ -136,6 +169,12 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
     private static IEnumerable<(string packageId, string version)> ReadPackageReferences(string csprojPath)
     {
         try { return CsprojParser.ReadPackageReferencesFromText(File.ReadAllText(csprojPath)); }
+        catch { return []; }
+    }
+
+    private static IEnumerable<string> ReadProjectReferences(string csprojPath)
+    {
+        try { return CsprojParser.ReadProjectReferencesFromText(File.ReadAllText(csprojPath)).ToList(); }
         catch { return []; }
     }
 
@@ -179,4 +218,4 @@ internal sealed record RepoScanResult(
 
 internal sealed record ParsedEdge(string PackageRef, string TargetRepoId, string VersionRange);
 
-internal sealed record RawPackageEdge(string OwnerPackageId, string RefPackageId, string VersionRange);
+internal sealed record RawPackageEdge(string OwnerPackageId, string RefPackageId, string VersionRange, string RefType = "package");

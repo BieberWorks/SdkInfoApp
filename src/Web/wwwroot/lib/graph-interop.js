@@ -662,6 +662,10 @@ function buildStyle() {
       style: { 'line-color': '#42a5f5', 'target-arrow-color': '#42a5f5', 'line-style': 'dashed' },
     },
     {
+      selector: 'edge[kind = "project"]',
+      style: { 'line-color': '#66bb6a', 'target-arrow-color': '#66bb6a', 'line-style': 'solid' },
+    },
+    {
       selector: 'edge[kind = "dangling"]',
       style: {
         'line-color': '#f44336',
