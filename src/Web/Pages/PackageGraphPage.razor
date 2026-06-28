@@ -156,25 +156,37 @@
             <MudText Typo="Typo.subtitle2">Depends on</MudText>
             @foreach (var edge in SnapshotService.GetPackageEdgesFrom(_selectedPackage.Id))
             {
-                <MudText Typo="Typo.caption">→ @ShortLabel(edge.To) (@edge.Kind)</MudText><br />
+                <div class="d-flex align-center gap-1 mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="@KindColor(edge.Kind)">@EdgeKindLabel(edge.Kind)</MudChip>
+                    <MudText Typo="Typo.caption">@ShortLabel(edge.To)</MudText>
+                </div>
             }
             @if (_showTransitive)
             {
                 @foreach (var id in pkgTransFrom)
                 {
-                    <MudText Typo="Typo.caption" Style="opacity:0.7;">⤳ @ShortLabel(id) (transitive)</MudText><br />
+                    <div class="d-flex align-center gap-1 mb-1" style="opacity:0.75;">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">transitive</MudChip>
+                        <MudText Typo="Typo.caption">@ShortLabel(id)</MudText>
+                    </div>
                 }
             }
             <MudText Typo="Typo.subtitle2" Class="mt-1">Used by</MudText>
             @foreach (var edge in SnapshotService.GetPackageEdgesTo(_selectedPackage.Id))
             {
-                <MudText Typo="Typo.caption">← @ShortLabel(edge.From) (@edge.Kind)</MudText><br />
+                <div class="d-flex align-center gap-1 mb-1">
+                    <MudChip T="string" Size="Size.Small" Color="@KindColor(edge.Kind)">@EdgeKindLabel(edge.Kind)</MudChip>
+                    <MudText Typo="Typo.caption">@ShortLabel(edge.From)</MudText>
+                </div>
             }
             @if (_showTransitive)
             {
                 @foreach (var id in pkgTransTo)
                 {
-                    <MudText Typo="Typo.caption" Style="opacity:0.7;">⤙ @ShortLabel(id) (transitive)</MudText><br />
+                    <div class="d-flex align-center gap-1 mb-1" style="opacity:0.75;">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">transitive</MudChip>
+                        <MudText Typo="Typo.caption">@ShortLabel(id)</MudText>
+                    </div>
                 }
             }
         </MudPaper>
@@ -341,6 +353,14 @@
         "contracts" => 2,
         "dangling" => 3,
         _ => 99,
+    };
+
+    private static Color KindColor(string kind) => kind switch
+    {
+        "project" => Color.Success,
+        "contracts" => Color.Info,
+        "dangling" => Color.Error,
+        _ => Color.Default,
     };
 
     private static string ShortLabel(string packageId)
