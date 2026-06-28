@@ -74,6 +74,20 @@
                 Dimmed opacity: @(_dimOpacity.ToString("F2"))
             </MudSlider>
         </MudItem>
+        @if (_presentEdgeKinds.Length > 1)
+        {
+            <MudItem xs="12" sm="7">
+                <MudText Typo="Typo.caption" Class="mb-1">Show edge kinds</MudText>
+                <MudToggleGroup T="string" SelectionMode="SelectionMode.MultiSelection"
+                                Values="_visibleEdgeKinds" ValuesChanged="OnEdgeKindsChanged"
+                                Size="Size.Small" Outlined="true" Dense="true">
+                    @foreach (var kind in _presentEdgeKinds)
+                    {
+                        <MudToggleItem T="string" Value="@kind">@EdgeKindLabel(kind)</MudToggleItem>
+                    }
+                </MudToggleGroup>
+            </MudItem>
+        }
     </MudGrid>
 </MudPaper>
 
@@ -148,12 +162,20 @@
     private bool _clickTransitive;
     private double _dimOpacity = 0.25;
     private string _layoutMode = "dagre";
+    private string[] _presentEdgeKinds = [];
+    private IEnumerable<string> _visibleEdgeKinds = [];
 
     protected override async Task OnInitializedAsync()
     {
         await SnapshotService.LoadAsync();
         _allModules = [.. SnapshotService.GetModulesSortedByTier()];
         _availableTiers = _allModules.Select(m => m.Tier).Distinct().Order().ToArray();
+
+        _presentEdgeKinds = [.. (SnapshotService.Snapshot?.Edges ?? [])
+            .Select(e => e.Kind)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(EdgeKindSortOrder)];
+        _visibleEdgeKinds = [.. _presentEdgeKinds];
 
         try
         {
@@ -263,6 +285,29 @@
             await _graph.SetDimOpacityAsync(value);
     }
 
+    private async Task OnEdgeKindsChanged(IEnumerable<string> values)
+    {
+        _visibleEdgeKinds = [.. values];
+        if (_graph is not null)
+            await _graph.SetEdgeKindFilterAsync([.. _visibleEdgeKinds]);
+    }
+
+    private static string EdgeKindLabel(string kind) => kind switch
+    {
+        "impl" => "Impl",
+        "contracts" => "Contracts",
+        "dangling" => "Dangling",
+        _ => kind,
+    };
+
+    private static int EdgeKindSortOrder(string kind) => kind switch
+    {
+        "impl" => 0,
+        "contracts" => 1,
+        "dangling" => 2,
+        _ => 99,
+    };
+
     private async Task SaveLayout()
     {
         if (_graph is not null)
@@ -281,11 +326,13 @@
         _selectedModule = null;
         _clickDirection = "both";
         _clickTransitive = false;
+        _visibleEdgeKinds = [.. _presentEdgeKinds];
         RebuildGraph();
         if (_graph is not null)
         {
             await _graph.ClearHighlightAsync();
             await _graph.SetClickModeAsync(_clickDirection, _clickTransitive);
+            await _graph.SetEdgeKindFilterAsync(null);
         }
     }
 }

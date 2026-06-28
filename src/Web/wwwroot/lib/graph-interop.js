@@ -112,6 +112,7 @@ export function initGraph(elementId, dotNetRef, persistKey, layoutName) {
     lastTappedId: null,
     baseIds: new Set(),
     combineMode: 'base',
+    visibleKinds: null, // null = all edge kinds visible; otherwise a Set of kinds to show
   };
   instances.set(elementId, inst);
 
@@ -210,6 +211,30 @@ export function setData(elementId, nodes, edges) {
     layout.one('layoutstop', () => captureLivePositions(inst));
     layout.run();
   }
+
+  // Re-apply edge-kind filter — elements were just recreated by cy.add()
+  applyEdgeKindFilter(inst);
+}
+
+// ─── Internal: hide/show edges based on inst.visibleKinds ────────────────────
+
+function applyEdgeKindFilter(inst) {
+  const visible = inst.visibleKinds; // null = show all
+  inst.cy.edges().forEach(e => {
+    if (!visible) { e.removeClass('kind-hidden'); return; }
+    const k = e.data('kind') || 'impl';
+    if (visible.has(k)) e.removeClass('kind-hidden');
+    else e.addClass('kind-hidden');
+  });
+}
+
+// kinds: array of edge-kind strings to keep visible, or null/empty-meaning-all.
+// Pass an explicit (possibly empty) array to hide everything not listed.
+export function setEdgeKindFilter(elementId, kinds) {
+  const inst = instances.get(elementId);
+  if (!inst) return;
+  inst.visibleKinds = kinds == null ? null : new Set(kinds);
+  applyEdgeKindFilter(inst);
 }
 
 export function highlightNodes(elementId, ids) {
@@ -644,6 +669,10 @@ function buildStyle() {
         'line-style': 'dotted',
         'width': 2.5,
       },
+    },
+    {
+      selector: 'edge.kind-hidden',
+      style: { 'display': 'none' },
     },
     {
       selector: 'node[?isDangling]',

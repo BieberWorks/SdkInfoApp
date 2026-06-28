@@ -85,6 +85,16 @@
             await _module.InvokeVoidAsync("setDimOpacity", _elementId, value);
     }
 
+    /// <summary>
+    /// Restrict which edge kinds are drawn. Pass the kinds that should stay visible
+    /// (e.g. ["impl", "contracts"]); pass <c>null</c> to show every kind.
+    /// </summary>
+    public async Task SetEdgeKindFilterAsync(IReadOnlyList<string>? kinds)
+    {
+        if (_initialized && _module is not null)
+            await _module.InvokeVoidAsync("setEdgeKindFilter", _elementId, kinds);
+    }
+
     public async Task ApplyLayoutAsync(string mode)
     {
         if (_initialized && _module is not null)
