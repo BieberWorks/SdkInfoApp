@@ -104,13 +104,25 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
             // Resolve sibling ProjectReferences to their package ids (intra-repo only)
             foreach (var include in ReadProjectReferences(csproj))
             {
-                var targetKey = CsprojParser.ResolveProjectReferencePath(csproj, include);
-                if (pathToPkg.TryGetValue(targetKey, out var refPkg)
-                    && !string.Equals(refPkg, packageId, StringComparison.OrdinalIgnoreCase)
-                    && refPkg.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)
-                    && packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
+                // Expand wildcard globs before lookup (e.g. `..\*.Contracts\*.csproj`)
+                // Glob expansion yields absolute paths; non-glob paths are relative and need ResolveProjectReferencePath.
+                bool isGlob = include.Contains('*') || include.Contains('?');
+                IEnumerable<string> resolvedIncludes = isGlob
+                    ? ExpandGlobProjectReference(csproj, include)
+                    : [include];
+
+                foreach (var resolved in resolvedIncludes)
                 {
-                    projectEdges.Add((packageId, refPkg));
+                    var targetKey = isGlob
+                        ? CsprojParser.NormalizeCsprojKey(resolved)
+                        : CsprojParser.ResolveProjectReferencePath(csproj, resolved);
+                    if (pathToPkg.TryGetValue(targetKey, out var refPkg)
+                        && !string.Equals(refPkg, packageId, StringComparison.OrdinalIgnoreCase)
+                        && refPkg.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase)
+                        && packageId.StartsWith("BieberWorks.SDK.", StringComparison.OrdinalIgnoreCase))
+                    {
+                        projectEdges.Add((packageId, refPkg));
+                    }
                 }
             }
         }
@@ -146,6 +158,63 @@ internal sealed partial class LocalWorkspaceScanner(ILogger<LocalWorkspaceScanne
 
         LogRepoScanned(repoId, ownPackages.Count, edges.Count);
         return new RepoScanResult(repoId, ownPackages, edges, pkgEdges, manifest);
+    }
+
+    /// <summary>
+    /// Expands a glob-style ProjectReference Include (e.g. <c>..\*.Contracts\*.csproj</c>)
+    /// into absolute paths by walking segments recursively.
+    /// Returns absolute csproj paths; non-matching globs yield an empty enumerable.
+    /// </summary>
+    private static IEnumerable<string> ExpandGlobProjectReference(string ownerCsproj, string include)
+    {
+        var ownerDir = Path.GetDirectoryName(Path.GetFullPath(ownerCsproj)) ?? "";
+        var segments = include.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return ExpandSegmented(ownerDir, segments);
+    }
+
+    private static IEnumerable<string> ExpandSegmented(string baseDir, string[] segments)
+    {
+        if (segments.Length == 0) yield break;
+
+        var head = segments[0];
+        var rest = segments[1..];
+
+        if (rest.Length == 0)
+        {
+            // File segment — may contain wildcard
+            foreach (var f in SafeGetFiles(baseDir, head))
+                yield return f;
+            yield break;
+        }
+
+        if (head == "..")
+        {
+            var parent = Path.GetDirectoryName(baseDir);
+            if (parent is not null)
+                foreach (var r in ExpandSegmented(parent, rest)) yield return r;
+        }
+        else if (head.Contains('*') || head.Contains('?'))
+        {
+            foreach (var d in SafeGetDirectories(baseDir, head))
+                foreach (var r in ExpandSegmented(d, rest)) yield return r;
+        }
+        else
+        {
+            var next = Path.Combine(baseDir, head);
+            foreach (var r in ExpandSegmented(next, rest)) yield return r;
+        }
+    }
+
+    private static IEnumerable<string> SafeGetFiles(string dir, string pattern)
+    {
+        try { return Directory.Exists(dir) ? Directory.GetFiles(dir, pattern) : []; }
+        catch { return []; }
+    }
+
+    private static IEnumerable<string> SafeGetDirectories(string dir, string pattern)
+    {
+        try { return Directory.Exists(dir) ? Directory.GetDirectories(dir, pattern) : []; }
+        catch { return []; }
     }
 
     private static string ReadPackagePrefix(string repoDir)
