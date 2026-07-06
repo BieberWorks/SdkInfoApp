@@ -44,12 +44,13 @@ internal sealed partial class ScannerApp(ILoggerFactory loggerFactory)
 
     private async Task<SdkSnapshot> RunLocalAsync(string workspace, CancellationToken ct)
     {
-        var localFeed = Path.Combine(workspace, "local-nuget-feed");
+        var sdkRoot = Path.Combine(workspace, "Sdk");
+        var localFeed = Path.Combine(sdkRoot, "local-nuget-feed");
         var scanner = new LocalWorkspaceScanner(loggerFactory.CreateLogger<LocalWorkspaceScanner>());
         var ghFetcher = new GitHubDataFetcher(loggerFactory.CreateLogger<GitHubDataFetcher>());
         var builder = new SnapshotBuilder(loggerFactory.CreateLogger<SnapshotBuilder>());
 
-        var repoInfos = scanner.ScanWorkspace(workspace);
+        var repoInfos = scanner.ScanWorkspace(sdkRoot);
         LogFoundRepos(repoInfos.Count);
 
         var localDevVersions = LocalFeedScanner.ScanFeed(localFeed);

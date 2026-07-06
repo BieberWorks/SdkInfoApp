@@ -5,7 +5,7 @@ var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
 var logger = loggerFactory.CreateLogger<ScannerApp>();
 
 string mode = "local";
-string workspace = @"C:\Users\biebe\source\repos\BieberWorks";
+string? workspace = null;
 string org = "BieberWorks";
 string output = "sdk-snapshot.json";
 string? branch = null;
@@ -32,6 +32,10 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
+// Default the workspace root path-independently so the whole tree can be relocated
+// (e.g. under repos\orgs\) without touching this file. Overridable via --workspace.
+workspace ??= ResolveWorkspaceRoot();
+
 var app = new ScannerApp(loggerFactory);
 
 try
@@ -45,3 +49,15 @@ catch (Exception ex)
 }
 
 return 0;
+
+// Walks up from the current directory to the BieberWorks workspace root, identified
+// by the presence of an "Sdk" subfolder. Falls back to the current directory.
+static string ResolveWorkspaceRoot()
+{
+    for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir is not null; dir = dir.Parent)
+    {
+        if (Directory.Exists(Path.Combine(dir.FullName, "Sdk")))
+            return dir.FullName;
+    }
+    return Directory.GetCurrentDirectory();
+}
