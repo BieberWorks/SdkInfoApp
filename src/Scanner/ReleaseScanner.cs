@@ -328,7 +328,12 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
 
             if (process.ExitCode != 0)
             {
-                LogGhExitCode(string.Join(" ", arguments), process.ExitCode, errorText.Trim());
+                var command = string.Join(" ", arguments);
+                var error = errorText.Trim();
+                if (error.Contains("HTTP 404", StringComparison.Ordinal))
+                    LogGhNotFoundResponse(command, error);
+                else
+                    LogGhExitCode(command, process.ExitCode, error);
                 return null;
             }
 
@@ -372,6 +377,9 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "gh command '{Command}' exited with code {ExitCode}: {Error}")]
     private partial void LogGhExitCode(string command, int exitCode, string error);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "gh command '{Command}' returned 404 (resource absent): {Error}")]
+    private partial void LogGhNotFoundResponse(string command, string error);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "No SDK-* repos found in org '{Org}' - aborting release scan")]
     private partial void LogNoSdkRepos(string org);
