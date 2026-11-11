@@ -14,6 +14,7 @@ builder.Services.AddScoped(sp =>
     return new HttpClient { BaseAddress = baseUri };
 });
 
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<SnapshotService>();
 builder.Services.AddScoped<ThemeService>();
 

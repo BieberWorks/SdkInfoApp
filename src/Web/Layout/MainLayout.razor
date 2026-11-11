@@ -62,6 +62,14 @@
 
     <MudMainContent>
         <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-4">
+            @if (Snapshot.StaleSince is { } staleSince)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined" Class="mb-4">
+                    @(staleSince == DateTimeOffset.MinValue
+                        ? "Snapshot date unknown - the automatic update failed or is outdated."
+                        : $"Snapshot from {staleSince.ToLocalTime():g} - the automatic update failed or is outdated.")
+                </MudAlert>
+            }
             @Body
         </MudContainer>
     </MudMainContent>

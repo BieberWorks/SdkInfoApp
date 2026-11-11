@@ -44,59 +44,122 @@ jobs:
       - name: Create snapshots directory
         run: mkdir -p publish/wwwroot/snapshots
 
+      - name: Fetch previously deployed snapshots (fallback)
+        # Best-effort: if the live site has no index yet (first deploy) or is unreachable,
+        # there is simply no fallback and the scan result is used as-is.
+        run: |
+          BASE="https://bieberworks.github.io/SdkInfoApp/snapshots"
+          mkdir -p fallback
+          if curl -fsSL --retry 2 "$BASE/index.json" -o fallback/index.json; then
+            python3 -c "
+          import json
+          for e in json.load(open('fallback/index.json')).get('branches', []):
+              print(e['branch'])
+          " > fallback/branches.txt || : > fallback/branches.txt
+            while read -r B; do
+              curl -fsSL --retry 2 "$BASE/sdk-snapshot.${B}.json" -o "fallback/sdk-snapshot.${B}.json" \
+                || rm -f "fallback/sdk-snapshot.${B}.json"
+            done < fallback/branches.txt
+          else
+            echo "No previous index available - no fallback"
+            rm -f fallback/index.json
+          fi
+          ls -la fallback
+
       - name: Scan branches and build index
         # SDK_READ_TOKEN must be a PAT with 'contents: read' on BieberWorks/SDK-* repos.
         # The default GITHUB_TOKEN only has access to this repository and cannot read
         # the private SDK-* repos in the BieberWorks org.
         # Branches are scanned in priority order: main first (used as default in the app).
-        # If a branch produces an empty snapshot (no repos had that branch) it is excluded
-        # from index.json so the app never offers a branch with zero modules.
+        # A branch counts as freshly scanned only if the scanner exits 0 and the snapshot has >0 modules.
+        # Otherwise the previously deployed snapshot (fallback/) is carried over with its OLD
+        # generatedAt and "stale":true, and the branch is recorded in the 'degraded' output so the
+        # final step can fail the job AFTER the deploy.
+        id: scan
         env:
           GH_TOKEN: ${{ secrets.SDK_READ_TOKEN }}
         run: |
           GENERATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          INDEX_ENTRIES=""
+          SNAP_DIR="publish/wwwroot/snapshots"
+          ENTRIES_FILE=$(mktemp)
+          DEGRADED=""
+
+          module_count() {
+            python3 -c "
+          import json, sys
+          try:
+              print(len(json.load(open(sys.argv[1])).get('modules', [])))
+          except Exception:
+              print(0)
+          " "$1"
+          }
+
+          old_generated_at() {
+            python3 -c "
+          import json, sys
+          try:
+              for e in json.load(open('fallback/index.json')).get('branches', []):
+                  if e['branch'] == sys.argv[1]:
+                      print(e.get('generatedAt', ''))
+          except Exception:
+              pass
+          " "$1"
+          }
+
+          add_entry() { # branch generatedAt stale(true|false)
+            python3 -c "
+          import json, sys
+          b, at, stale = sys.argv[1:4]
+          e = {'branch': b, 'file': f'snapshots/sdk-snapshot.{b}.json', 'generatedAt': at}
+          if stale == 'true':
+              e['stale'] = True
+          print(json.dumps(e))
+          " "$1" "$2" "$3" >> "$ENTRIES_FILE"
+          }
 
           for BRANCH in main staging dev; do
-            OUT="publish/wwwroot/snapshots/sdk-snapshot.${BRANCH}.json"
+            OUT="$SNAP_DIR/sdk-snapshot.${BRANCH}.json"
+            FALLBACK="fallback/sdk-snapshot.${BRANCH}.json"
             echo "--- Scanning branch: $BRANCH ---"
 
+            SCAN_RC=0
             dotnet run --project src/Scanner --configuration Release \
               -- --mode release --org BieberWorks \
                  --branch "$BRANCH" \
-                 --output "$OUT" || true
+                 --output "$OUT" || SCAN_RC=$?
 
-            # Verify the file was written and contains at least one module
-            if [ -f "$OUT" ]; then
-              MODULE_COUNT=$(python3 -c "
-          import json, sys
-          try:
-              d = json.load(open('$OUT'))
-              print(len(d.get('modules', [])))
-          except Exception:
-              print(0)
-          ")
-              echo "Branch $BRANCH: $MODULE_COUNT modules"
-              if [ "$MODULE_COUNT" -gt "0" ]; then
-                ENTRY="{\"branch\":\"${BRANCH}\",\"file\":\"snapshots/sdk-snapshot.${BRANCH}.json\",\"generatedAt\":\"${GENERATED_AT}\"}"
-                if [ -z "$INDEX_ENTRIES" ]; then
-                  INDEX_ENTRIES="$ENTRY"
-                else
-                  INDEX_ENTRIES="$INDEX_ENTRIES,$ENTRY"
-                fi
-              else
-                echo "Branch $BRANCH produced 0 modules — excluding from index"
-                rm -f "$OUT"
-              fi
+            COUNT=0
+            if [ "$SCAN_RC" -eq 0 ] && [ -f "$OUT" ]; then
+              COUNT=$(module_count "$OUT")
+            fi
+            echo "Branch $BRANCH: scanner exit=$SCAN_RC, $COUNT modules"
+
+            if [ "$COUNT" -gt 0 ]; then
+              add_entry "$BRANCH" "$GENERATED_AT" false
+              continue
+            fi
+
+            rm -f "$OUT"
+            DEGRADED="$DEGRADED $BRANCH"
+            if [ -f "$FALLBACK" ]; then
+              OLD_AT=$(old_generated_at "$BRANCH")
+              echo "::warning::Branch $BRANCH not freshly scanned - carrying over previous snapshot (generatedAt=${OLD_AT:-unknown})"
+              cp "$FALLBACK" "$OUT"
+              add_entry "$BRANCH" "$OLD_AT" true
             else
-              echo "Branch $BRANCH: no output file produced — skipping"
+              echo "::warning::Branch $BRANCH not freshly scanned and no fallback available - excluded from index"
             fi
           done
 
-          # Write index.json
-          echo "{\"branches\":[${INDEX_ENTRIES}]}" > publish/wwwroot/snapshots/index.json
+          python3 -c "
+          import json, sys
+          entries = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+          json.dump({'branches': entries}, open(sys.argv[2], 'w'))
+          " "$ENTRIES_FILE" "$SNAP_DIR/index.json"
           echo "--- index.json ---"
-          cat publish/wwwroot/snapshots/index.json
+          cat "$SNAP_DIR/index.json"; echo
+
+          echo "degraded=$(echo $DEGRADED)" >> "$GITHUB_OUTPUT"
 
       - name: Create 404.html SPA fallback
         # GitHub Pages returns 404.html for any path that does not exist.
@@ -132,3 +195,13 @@ jobs:
           path: publish/wwwroot/
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Fail if any branch could not be scanned fresh
+        # Runs after the deploy so the site (with fallback snapshots) is published,
+        # but the job still turns red so the failure is not silent.
+        if: ${{ !cancelled() && steps.scan.outputs.degraded != '' }}
+        env:
+          DEGRADED: ${{ steps.scan.outputs.degraded }}
+        run: |
+          echo "::error::Branches not freshly scanned (fallback used or excluded): $DEGRADED"
+          exit 1

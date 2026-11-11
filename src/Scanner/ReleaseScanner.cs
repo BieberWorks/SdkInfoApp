@@ -28,6 +28,12 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
     {
         var repoNames = await ListSdkReposAsync(org, ct);
         LogFoundRepos(org, repoNames.Count);
+        if (repoNames.Count == 0)
+        {
+            LogNoSdkRepos(org);
+            throw new InvalidOperationException(
+                $"No SDK-* repos found in org '{org}' (repo listing failed or token lacks access).");
+        }
 
         var results = new Dictionary<string, RepoScanResult>(StringComparer.OrdinalIgnoreCase);
         var semaphore = new SemaphoreSlim(MaxParallelism);
@@ -313,10 +319,20 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
                 process.StartInfo.ArgumentList.Add(arg);
 
             process.Start();
-            var output = await process.StandardOutput.ReadToEndAsync(ct);
+            // Read both streams concurrently to avoid a pipe-buffer deadlock.
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+            var stderrTask = process.StandardError.ReadToEndAsync(ct);
             await process.WaitForExitAsync(ct);
+            var output = await stdoutTask;
+            var errorText = await stderrTask;
 
-            return process.ExitCode == 0 ? output.Trim() : null;
+            if (process.ExitCode != 0)
+            {
+                LogGhExitCode(string.Join(" ", arguments), process.ExitCode, errorText.Trim());
+                return null;
+            }
+
+            return output.Trim();
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
         {
@@ -353,6 +369,12 @@ internal sealed partial class ReleaseScanner(ILogger<ReleaseScanner> logger)
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "gh CLI not found in PATH. Release scan will return empty results.")]
     private partial void LogGhNotFound();
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "gh command '{Command}' exited with code {ExitCode}: {Error}")]
+    private partial void LogGhExitCode(string command, int exitCode, string error);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "No SDK-* repos found in org '{Org}' - aborting release scan")]
+    private partial void LogNoSdkRepos(string org);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "gh command '{Command}' failed: {Error}")]
     private partial void LogGhError(string command, string error);

@@ -17,6 +17,10 @@ public sealed record BranchInfo
 
     [JsonPropertyName("generatedAt")]
     public string? GeneratedAt { get; init; }
+
+    /// <summary>Set by the deploy workflow when this entry is a carried-over fallback.</summary>
+    [JsonPropertyName("stale")]
+    public bool Stale { get; init; }
 }
 
 /// <summary>Schema for <c>snapshots/index.json</c>.</summary>
@@ -26,7 +30,7 @@ file sealed record SnapshotIndex
     public IReadOnlyList<BranchInfo> Branches { get; init; } = [];
 }
 
-public sealed class SnapshotService(HttpClient http, IJSRuntime js)
+public sealed class SnapshotService(HttpClient http, IJSRuntime js, TimeProvider time)
 {
     private const string LocalStorageKey = "sdkinfo.branch";
 
@@ -45,6 +49,22 @@ public sealed class SnapshotService(HttpClient http, IJSRuntime js)
     public bool IsLocalMode => _snapshot?.Branch == "local";
     public IReadOnlyList<BranchInfo> Branches => _branches;
     public string SelectedBranch => _selectedBranch;
+
+    /// <summary>
+    /// Timestamp of the loaded snapshot when stale (older than 48 h or flagged in the index);
+    /// <see langword="null"/> when fresh or in local mode.
+    /// </summary>
+    public DateTimeOffset? StaleSince
+    {
+        get
+        {
+            if (_snapshot is null) return null;
+            var entry = _branches.FirstOrDefault(b => b.Branch == _selectedBranch);
+            var at = entry?.GeneratedAt
+                ?? _snapshot.GeneratedAt.ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+            return SnapshotFreshness.GetStaleSince(_snapshot.Branch, at, entry?.Stale ?? false, time);
+        }
+    }
 
     public event Action? OnChange;
 
