@@ -12,6 +12,8 @@ public sealed record CyNode
     [JsonPropertyName("group")] public string Group { get; init; } = "";
     [JsonPropertyName("releaseOrder")] public int? ReleaseOrder { get; init; }
     [JsonPropertyName("isDangling")] public bool IsDangling { get; init; }
+    /// <summary>"module" | "service"; services render with a distinct node shape.</summary>
+    [JsonPropertyName("kind")] public string Kind { get; init; } = "module";
 }
 
 public sealed record CyEdge

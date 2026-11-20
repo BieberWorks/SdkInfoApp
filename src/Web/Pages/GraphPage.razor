@@ -233,7 +233,8 @@
             .Select(m => new CyNode
             {
                 Id = m.Id,
-                Label = m.Id.Replace("SDK-", ""),
+                Label = ModuleDisplayName.Of(m.Id),
+                Kind = m.Kind,
                 Tier = m.Tier,
                 CiStatus = m.CiStatus,
                 HasLocalDev = m.LocalDevPresent,

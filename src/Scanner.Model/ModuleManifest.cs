@@ -8,6 +8,10 @@ public sealed record ModuleManifest
     [JsonPropertyName("moduleId")]
     public string ModuleId { get; init; } = "";
 
+    /// <summary>"module" | "service"; null = derive via <see cref="ModuleKindResolver"/>.</summary>
+    [JsonPropertyName("kind")]
+    public string? Kind { get; init; }
+
     [JsonPropertyName("tier")]
     public int? Tier { get; init; }
 

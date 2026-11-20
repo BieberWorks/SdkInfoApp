@@ -183,6 +183,7 @@ export function setData(elementId, nodes, edges) {
         hasLocalDev: n.hasLocalDev,
         group: n.group,
         isDangling: n.isDangling ?? false,
+        kind: n.kind ?? 'module',
       }
     })),
     ...edges.map(e => ({
@@ -641,6 +642,10 @@ function buildStyle() {
     {
       selector: 'node[ciStatus = "failure"]',
       style: { 'border-width': 3, 'border-color': '#f44336' },
+    },
+    {
+      selector: 'node[kind = "service"]',
+      style: { 'shape': 'hexagon' },
     },
     {
       selector: 'node[?hasLocalDev]',

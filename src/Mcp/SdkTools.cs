@@ -18,15 +18,22 @@ public sealed class SdkTools(SdkSnapshot snapshot)
     // ── list_modules ──────────────────────────────────────────────────────────
 
     [McpServerTool]
-    [Description("Lists all SDK modules with their tier, latest GitHub version, and capability count.")]
-    public string list_modules()
+    [Description("Lists all SDK modules and services with their kind, tier, latest GitHub version, and capability count. Optionally filter by kind.")]
+    public string list_modules(
+        [Description("Optional filter: 'module' or 'service'. Omit for all.")] string? kind = null)
     {
+        if (!string.IsNullOrWhiteSpace(kind) && !ModuleKinds.IsKnown(kind))
+            return JsonSerializer.Serialize(new { error = $"Unknown kind '{kind}'. Use 'module' or 'service'." }, SerializeOptions);
+
         var result = snapshot.Modules
-            .OrderBy(m => m.Tier)
+            .Where(m => string.IsNullOrWhiteSpace(kind) || string.Equals(m.Kind, kind, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(m => string.Equals(m.Kind, ModuleKinds.Service, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenBy(m => m.Tier)
             .ThenBy(m => m.Id)
             .Select(m => new
             {
                 id = m.Id,
+                kind = m.Kind,
                 tier = m.Tier,
                 latestGhVersion = m.LatestGhVersion,
                 capabilitiesCount = m.Capabilities.Count,
@@ -64,6 +71,7 @@ public sealed class SdkTools(SdkSnapshot snapshot)
         {
             id = module.Id,
             repoName = module.RepoName,
+            kind = module.Kind,
             tier = module.Tier,
             latestGhVersion = module.LatestGhVersion,
             localDevVersion = module.LocalDevVersion,
@@ -136,6 +144,7 @@ public sealed class SdkTools(SdkSnapshot snapshot)
             allModules = allModules.Select(m => new
             {
                 id = m.Id,
+                kind = m.Kind,
                 tier = m.Tier,
                 latestGhVersion = m.LatestGhVersion,
                 isDirect = directIds.Contains(m.Id),
@@ -167,6 +176,7 @@ public sealed class SdkTools(SdkSnapshot snapshot)
             .Select(m => new
             {
                 id = m.Id,
+                kind = m.Kind,
                 tier = m.Tier,
                 latestGhVersion = m.LatestGhVersion,
                 isSeed = moduleIds.Contains(m.Id, StringComparer.OrdinalIgnoreCase),
@@ -205,6 +215,7 @@ public sealed class SdkTools(SdkSnapshot snapshot)
             .Select(m => new
             {
                 id = m.Id,
+                kind = m.Kind,
                 tier = m.Tier,
                 latestGhVersion = m.LatestGhVersion,
             })
