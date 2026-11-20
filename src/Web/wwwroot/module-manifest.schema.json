@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bieberworks.github.io/SdkInfoApp/module-manifest.schema.json",
+  "title": "SDK module manifest",
+  "description": "module.manifest.json in the root of an SDK repo. Read by the SdkInfoApp scanner.",
+  "type": "object",
+  "required": ["moduleId"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "moduleId": {
+      "type": "string",
+      "description": "Repo name, for example SDK-Auth or SDK-Service-Identity."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["module", "service"],
+      "description": "module = hosted in another process as a NuGet package; service = own process with its own deployment. If missing, the scanner falls back to the tag 'service', then the repo prefix 'SDK-Service-', else 'module'."
+    },
+    "tier": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Informational. The snapshot computes the tier from the dependency graph."
+    },
+    "description": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "docsUrl": { "type": "string", "format": "uri" },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "category"],
+        "properties": {
+          "id": { "type": "string", "description": "Unique id, for example auth:login or service:identity." },
+          "label": { "type": "string" },
+          "category": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
