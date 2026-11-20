@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using SdkInfoApp.Scanner.Model;
-using System.Text.Json;
 
 namespace SdkInfoApp.Scanner;
 
@@ -34,6 +33,7 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
 
         // Dangling-ref tracking: warnings deduplicated
         var danglingWarnings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var kindWarnings = new List<string>();
 
         foreach (var (repoId, scan) in repoInfos)
         {
@@ -41,10 +41,18 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
             var localDev = FindLocalDevVersion(scan.OwnPackages, localDevVersions);
             var manifest = scan.Manifest;
 
+            var kindResult = ModuleKindResolver.ResolveWithWarning(manifest, repoId);
+            if (kindResult.Warning is not null)
+            {
+                kindWarnings.Add(kindResult.Warning);
+                LogUnknownKind(kindResult.Warning);
+            }
+
             var module = new ModuleInfo
             {
                 Id = repoId,
                 RepoName = repoId,
+                Kind = kindResult.Kind,
                 Tier = tierMap.GetValueOrDefault(repoId, 0),
                 ReleaseOrder = releaseOrderMap.TryGetValue(repoId, out var ro) ? ro : null,
                 Packages = scan.OwnPackages,
@@ -115,8 +123,8 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
             }
         }
 
-        // Sort modules by tier then name for stable output
-        modules.Sort((a, b) => a.Tier != b.Tier ? a.Tier.CompareTo(b.Tier) : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+        // Sort modules by kind (modules first), then tier, then name for stable output
+        modules.Sort(CompareModules);
 
         // Build package-level graph
         var (packageNodes, packageEdges) = BuildPackageGraph(repoInfos, tierMap, knownPackageIds);
@@ -133,8 +141,8 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         var driftWarnings = CheckReleaseOrderDrift(repoInfos, releaseOrderMap, [.. edges.Where(e => e.Kind != "dangling")]);
 
         // Combine all warnings (dangling first, then drift)
-        var allWarnings = danglingWarnings
-            .OrderBy(w => w, StringComparer.OrdinalIgnoreCase)
+        var allWarnings = kindWarnings
+            .Concat(danglingWarnings.OrderBy(w => w, StringComparer.OrdinalIgnoreCase))
             .Concat(driftWarnings)
             .ToList();
 
@@ -152,6 +160,21 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
             Warnings = allWarnings,
         };
     }
+
+    private static int CompareModules(ModuleInfo a, ModuleInfo b)
+    {
+        var byKind = KindOrder(a.Kind).CompareTo(KindOrder(b.Kind));
+        if (byKind != 0) return byKind;
+        return a.Tier != b.Tier
+            ? a.Tier.CompareTo(b.Tier)
+            : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int KindOrder(string kind)
+        => string.Equals(kind, ModuleKinds.Service, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Message}")]
+    private partial void LogUnknownKind(string message);
 
     /// <summary>
     /// For every raw package edge whose target is not a known package, emit a module-level
@@ -202,6 +225,8 @@ internal sealed partial class SnapshotBuilder(ILogger<SnapshotBuilder> logger)
         // Split on '.' and take the 3rd segment (index 2) as the module name
         var parts = packageId.Split('.');
         if (parts.Length < 3) return null;
+        if (parts.Length >= 4 && string.Equals(parts[2], "Service", StringComparison.OrdinalIgnoreCase))
+            return $"SDK-Service-{parts[3]}";
         return $"SDK-{parts[2]}";
     }
 

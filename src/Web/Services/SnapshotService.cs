@@ -108,6 +108,7 @@ public sealed class SnapshotService(HttpClient http, IJSRuntime js, TimeProvider
                 _selectedBranch = branchName;
             }
 
+            _snapshot = SnapshotCompat.ApplyV1KindFallback(_snapshot);
             _loaded = true;
         }
         catch (Exception ex)
@@ -131,6 +132,14 @@ public sealed class SnapshotService(HttpClient http, IJSRuntime js, TimeProvider
 
     public IReadOnlyList<ModuleInfo> GetModulesSortedByTier()
         => _snapshot?.Modules
+            .OrderBy(m => m.Tier)
+            .ThenBy(m => m.Id)
+            .ToList() ?? [];
+
+    /// <summary>Modules of the given kind (see <see cref="ModuleKinds"/>), sorted by tier then id.</summary>
+    public IReadOnlyList<ModuleInfo> GetByKind(string kind)
+        => _snapshot?.Modules
+            .Where(m => string.Equals(m.Kind, kind, StringComparison.OrdinalIgnoreCase))
             .OrderBy(m => m.Tier)
             .ThenBy(m => m.Id)
             .ToList() ?? [];

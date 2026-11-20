@@ -23,6 +23,8 @@
 @{
     var snapshot = SnapshotService.Snapshot!;
     var modules = SnapshotService.GetModulesSortedByTier();
+    var moduleList = SnapshotService.GetByKind(ModuleKinds.Module);
+    var serviceList = SnapshotService.GetByKind(ModuleKinds.Service);
     var withManifest = modules.Count(m => m.ManifestSource == "file");
     var unpushed = modules.Where(m => m.LocalDevPresent).ToList();
     var ciOk = modules.Count(m => m.CiStatus == "success");
@@ -34,8 +36,8 @@
 <MudGrid Spacing="3" Class="mb-4">
     <MudItem xs="12" sm="6" md="3">
         <MudPaper Class="pa-4" Elevation="1">
-            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Modules</MudText>
-            <MudText Typo="Typo.h4">@modules.Count</MudText>
+            <MudText Typo="Typo.subtitle2" Color="Color.Secondary">Modules / Services</MudText>
+            <MudText Typo="Typo.h4">@moduleList.Count / @serviceList.Count</MudText>
         </MudPaper>
     </MudItem>
     <MudItem xs="12" sm="6" md="3">
@@ -104,15 +106,28 @@
     </MudAlert>
 </DevOnlyPanel>
 
-<MudText Typo="Typo.h5" Class="mb-2">All Modules</MudText>
-<MudGrid Spacing="2">
-    @foreach (var module in modules)
+<MudText Typo="Typo.h5" Class="mb-2">Modules (@moduleList.Count)</MudText>
+<MudGrid Spacing="2" Class="mb-4">
+    @foreach (var module in moduleList)
     {
         <MudItem xs="12" sm="6" md="4">
             <ModuleCard Module="@module" OnViewDetails="NavigateToDetail" />
         </MudItem>
     }
 </MudGrid>
+
+@if (serviceList.Count > 0)
+{
+    <MudText Typo="Typo.h5" Class="mb-2">Services (@serviceList.Count)</MudText>
+    <MudGrid Spacing="2">
+        @foreach (var module in serviceList)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <ModuleCard Module="@module" OnViewDetails="NavigateToDetail" />
+            </MudItem>
+        }
+    </MudGrid>
+}
 
 @code {
     protected override async Task OnInitializedAsync()

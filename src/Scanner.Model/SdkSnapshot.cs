@@ -6,7 +6,7 @@ namespace SdkInfoApp.Scanner.Model;
 public sealed record SdkSnapshot
 {
     [JsonPropertyName("schemaVersion")]
-    public string SchemaVersion { get; init; } = "1";
+    public string SchemaVersion { get; init; } = "2";
 
     [JsonPropertyName("snapshotMode")]
     public string SnapshotMode { get; init; } = "local";
@@ -46,6 +46,10 @@ public sealed record ModuleInfo
 
     [JsonPropertyName("repoName")]
     public string RepoName { get; init; } = "";
+
+    /// <summary>"module" | "service" (see <see cref="ModuleKinds"/>). Absent in v1 snapshots.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; init; } = ModuleKinds.Module;
 
     [JsonPropertyName("tier")]
     public int Tier { get; init; }

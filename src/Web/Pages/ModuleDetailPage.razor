@@ -13,15 +13,20 @@
 
 @if (string.IsNullOrEmpty(ModuleId))
 {
-    <MudText Typo="Typo.h4" Class="mb-4">All Modules</MudText>
-    <MudGrid Spacing="2">
-        @foreach (var m in SnapshotService.GetModulesSortedByTier())
-        {
-            <MudItem xs="12" sm="6" md="4">
-                <ModuleCard Module="@m" OnViewDetails="NavigateToDetail" />
-            </MudItem>
-        }
-    </MudGrid>
+    @foreach (var kind in new[] { ModuleKinds.Module, ModuleKinds.Service })
+    {
+        var group = SnapshotService.GetByKind(kind);
+        if (group.Count == 0) continue;
+        <MudText Typo="Typo.h4" Class="mb-2 mt-2">@(kind == ModuleKinds.Service ? "Services" : "Modules")</MudText>
+        <MudGrid Spacing="2" Class="mb-4">
+            @foreach (var m in group)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <ModuleCard Module="@m" OnViewDetails="NavigateToDetail" />
+                </MudItem>
+            }
+        </MudGrid>
+    }
     return;
 }
 
@@ -39,6 +44,7 @@
         <MudPaper Class="pa-4" Elevation="2">
             <div class="d-flex align-center gap-2 mb-3">
                 <MudText Typo="Typo.h4">@Module.Id</MudText>
+                <MudChip T="string" Color="@(Module.Kind == ModuleKinds.Service ? Color.Secondary : Color.Info)">@Module.Kind</MudChip>
                 <MudChip T="string" Color="Color.Primary">Tier @Module.Tier</MudChip>
                 <CiStatusChip Status="@Module.CiStatus" />
             </div>
